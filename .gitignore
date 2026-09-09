@@ -1,0 +1,53 @@
+# Environment & Secrets
+.env
+.env.*
+*.env
+*.pem
+*.key
+*.crt
+
+# Databases
+*.db
+*.sqlite
+*.sqlite3
+backend/instance/
+instance/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+venv/
+.venv/
+env/
+.pytest_cache/
+
+# Node & Frontend
+node_modules/
+dist/
+build/
+.svelte-kit/
+.next/
+
+# Generated Audio & Media
+*.mp3
+*.wav
+generated_audio/
+backend/generated_audio/
+temp_audio/
+vetri_generated_audio/
+
+# Logs & Temporary Files
+*.log
+logs/
+tmp/
+temp/
+scratch/
+backend/scratch/
+
+# OS / Editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
