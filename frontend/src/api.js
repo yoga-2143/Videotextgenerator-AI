@@ -1,4 +1,5 @@
-const BASE = '/api'
+const BASE = (import.meta.env.VITE_API_BASE_URL || '/api').replace(/\/+$/, '')
+
 
 function authHeaders() {
   const token = localStorage.getItem('vetri_token')

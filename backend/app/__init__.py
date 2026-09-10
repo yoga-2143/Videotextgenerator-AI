@@ -14,11 +14,15 @@ def create_app():
     app.config.from_object("app.config.Config")
 
     db.init_app(app)
-    CORS(app, origins=[
-        os.getenv("FRONTEND_URL", "http://localhost:5173"),
-        "http://127.0.0.1:5173",
-        "http://localhost:5173"
-    ], supports_credentials=True)
+    frontend_url = os.getenv("FRONTEND_URL")
+    origins = []
+    if frontend_url:
+        origins.append(frontend_url.rstrip("/"))
+    origins.extend(["http://localhost:5173", "http://127.0.0.1:5173"])
+    allowed_origins = list(dict.fromkeys(origins))
+
+    CORS(app, origins=allowed_origins, supports_credentials=True)
+
 
     from app.routes.health import health_bp
     from app.routes.youtube import youtube_bp

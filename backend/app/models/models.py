@@ -103,3 +103,20 @@ class TranslationCache(db.Model):
 
     __table_args__ = (db.UniqueConstraint("article_id", "target_language", name="uq_article_target_lang"),)
 
+
+class ProcessingJob(db.Model):
+    __tablename__ = "processing_jobs"
+    job_id = db.Column(db.String(50), primary_key=True)
+    video_id = db.Column(db.String(50), nullable=True, index=True)
+    youtube_url = db.Column(db.String(500), nullable=True)
+    status = db.Column(db.String(20), default="processing", index=True)
+    stage = db.Column(db.String(50), default="QUEUED")
+    progress = db.Column(db.Integer, default=5)
+    message = db.Column(db.Text, nullable=True)
+    result_json = db.Column(LongText, nullable=True)
+    error_json = db.Column(db.Text, nullable=True)
+    cancelled = db.Column(db.Boolean, default=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+

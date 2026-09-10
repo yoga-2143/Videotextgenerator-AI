@@ -134,6 +134,83 @@ def log_pipeline_stage(
     return log_payload
 
 
+import json
+
+def _sync_job_to_db(job_data: dict):
+    """Safely updates or inserts ProcessingJob database record."""
+    try:
+        from app import db
+        from app.models.models import ProcessingJob
+        job_id = job_data.get("job_id")
+        if not job_id:
+            return
+        pj = db.session.get(ProcessingJob, job_id)
+        res_json = json.dumps(job_data.get("result")) if job_data.get("result") is not None else None
+        err_json = json.dumps(job_data.get("error")) if job_data.get("error") is not None else None
+        if not pj:
+            pj = ProcessingJob(
+                job_id=job_id,
+                video_id=job_data.get("video_id"),
+                youtube_url=job_data.get("url"),
+                status=job_data.get("status", "processing"),
+                stage=job_data.get("stage", JobStage.QUEUED),
+                progress=job_data.get("progress", 5),
+                message=job_data.get("message", ""),
+                result_json=res_json,
+                error_json=err_json,
+                cancelled=job_data.get("cancelled", False),
+            )
+            db.session.add(pj)
+        else:
+            if job_data.get("video_id"):
+                pj.video_id = job_data.get("video_id")
+            if job_data.get("url"):
+                pj.youtube_url = job_data.get("url")
+            pj.status = job_data.get("status", pj.status)
+            pj.stage = job_data.get("stage", pj.stage)
+            pj.progress = job_data.get("progress", pj.progress)
+            pj.message = job_data.get("message", pj.message)
+            if res_json is not None:
+                pj.result_json = res_json
+            if err_json is not None:
+                pj.error_json = err_json
+            pj.cancelled = job_data.get("cancelled", pj.cancelled)
+        db.session.commit()
+    except Exception as e:
+        logger.debug(f"[JOB_DB_SYNC_NOTE] Could not sync job {job_data.get('job_id')} to DB: {e}")
+
+
+def _get_job_from_db(job_id: str) -> dict:
+    """Reads ProcessingJob from database to support multi-worker process polling."""
+    try:
+        from app import db
+        from app.models.models import ProcessingJob
+        pj = db.session.get(ProcessingJob, job_id)
+        if not pj:
+            return None
+        res_data = json.loads(pj.result_json) if pj.result_json else None
+        err_data = json.loads(pj.error_json) if pj.error_json else None
+        return {
+            "job_id": pj.job_id,
+            "video_id": pj.video_id,
+            "url": pj.youtube_url,
+            "status": pj.status,
+            "stage": pj.stage,
+            "progress": pj.progress,
+            "message": pj.message,
+            "result_available": bool(res_data),
+            "stage_timings": {},
+            "created_at": pj.created_at.timestamp() if pj.created_at else time.time(),
+            "updated_at": pj.updated_at.timestamp() if pj.updated_at else time.time(),
+            "result": res_data,
+            "error": err_data,
+            "cancelled": bool(pj.cancelled),
+        }
+    except Exception as e:
+        logger.debug(f"[JOB_DB_READ_NOTE] Could not read job {job_id} from DB: {e}")
+        return None
+
+
 def create_video_job(url: str, video_id: str) -> str:
     job_id = f"job_{uuid.uuid4().hex[:12]}"
     now = time.time()
@@ -155,6 +232,7 @@ def create_video_job(url: str, video_id: str) -> str:
     }
     with JOBS_LOCK:
         VIDEO_JOBS[job_id] = job_data
+    _sync_job_to_db(job_data)
     logger.info(f"[JOB_CREATED] JobID={job_id} | VideoID={video_id} | URL={url}")
     return job_id
 
@@ -162,7 +240,11 @@ def create_video_job(url: str, video_id: str) -> str:
 def update_job_stage(job_id: str, stage: str, message_override: str = None, progress_override: int = None):
     with JOBS_LOCK:
         if job_id not in VIDEO_JOBS:
-            return
+            db_job = _get_job_from_db(job_id)
+            if db_job:
+                VIDEO_JOBS[job_id] = db_job
+            else:
+                return
         job = VIDEO_JOBS[job_id]
         if job.get("cancelled"):
             return
@@ -189,11 +271,16 @@ def update_job_stage(job_id: str, stage: str, message_override: str = None, prog
             job["status"] = "failed"
             job["result_available"] = False
 
+        _sync_job_to_db(job)
         logger.info(f"[STAGE_UPDATED] JobID={job_id} | Stage={stage} | Progress={job['progress']}% | Message='{job['message']}'")
 
 
 def set_job_result(job_id: str, result_data: dict):
     with JOBS_LOCK:
+        if job_id not in VIDEO_JOBS:
+            db_job = _get_job_from_db(job_id)
+            if db_job:
+                VIDEO_JOBS[job_id] = db_job
         if job_id in VIDEO_JOBS:
             job = VIDEO_JOBS[job_id]
             if job.get("cancelled"):
@@ -205,11 +292,16 @@ def set_job_result(job_id: str, result_data: dict):
             job["progress"] = 100
             job["message"] = STAGE_MESSAGES[JobStage.COMPLETED]
             job["updated_at"] = time.time()
+            _sync_job_to_db(job)
             logger.info(f"[JOB_SUCCESS] JobID={job_id} | Result payload attached.")
 
 
 def set_job_error(job_id: str, error_code: str, user_message: str, retryable: bool = True):
     with JOBS_LOCK:
+        if job_id not in VIDEO_JOBS:
+            db_job = _get_job_from_db(job_id)
+            if db_job:
+                VIDEO_JOBS[job_id] = db_job
         if job_id in VIDEO_JOBS:
             job = VIDEO_JOBS[job_id]
             if job.get("cancelled"):
@@ -224,6 +316,7 @@ def set_job_error(job_id: str, error_code: str, user_message: str, retryable: bo
             job["progress"] = 0
             job["message"] = user_message
             job["updated_at"] = time.time()
+            _sync_job_to_db(job)
             if error_code == "DATABASE_TEARDOWN":
                 logger.debug(f"[JOB_FAILED] JobID={job_id} | Code={error_code} | Message='{user_message}'")
             else:
@@ -232,6 +325,10 @@ def set_job_error(job_id: str, error_code: str, user_message: str, retryable: bo
 
 def cancel_job(job_id: str) -> bool:
     with JOBS_LOCK:
+        if job_id not in VIDEO_JOBS:
+            db_job = _get_job_from_db(job_id)
+            if db_job:
+                VIDEO_JOBS[job_id] = db_job
         if job_id in VIDEO_JOBS:
             job = VIDEO_JOBS[job_id]
             job["cancelled"] = True
@@ -241,6 +338,7 @@ def cancel_job(job_id: str) -> bool:
             job["message"] = STAGE_MESSAGES[JobStage.CANCELLED]
             job["error"] = {"code": "JOB_CANCELLED", "message": "Job was cancelled by the user.", "retryable": True}
             job["updated_at"] = time.time()
+            _sync_job_to_db(job)
             logger.info(f"[JOB_CANCELLED] JobID={job_id}")
             return True
         return False
@@ -250,16 +348,25 @@ def is_job_cancelled(job_id: str) -> bool:
     with JOBS_LOCK:
         if job_id in VIDEO_JOBS:
             return VIDEO_JOBS[job_id].get("cancelled", False)
+        db_job = _get_job_from_db(job_id)
+        if db_job:
+            VIDEO_JOBS[job_id] = db_job
+            return db_job.get("cancelled", False)
         return False
 
 
 def get_job_state(job_id: str) -> dict:
     with JOBS_LOCK:
-        if job_id not in VIDEO_JOBS:
-            return None
-        return dict(VIDEO_JOBS[job_id])
+        if job_id in VIDEO_JOBS:
+            return dict(VIDEO_JOBS[job_id])
+        db_job = _get_job_from_db(job_id)
+        if db_job:
+            VIDEO_JOBS[job_id] = db_job
+            return dict(db_job)
+        return None
 
 
 def submit_video_processing_task(target_func, *args, **kwargs):
     """Submits worker task to the dedicated thread pool."""
     return JOB_EXECUTOR.submit(target_func, *args, **kwargs)
+
