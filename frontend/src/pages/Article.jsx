@@ -668,16 +668,18 @@ export default function Article() {
       )}
 
       {/* Programmatic Hidden Audio Element */}
-      <audio
-        ref={audioRef}
-        src={audioUrl || ''}
-        preload="auto"
-        className="hidden"
-        onPlay={() => setIsPlaying(true)}
-        onPause={() => setIsPlaying(false)}
-        onEnded={() => setIsPlaying(false)}
-        onError={() => setError('Unable to generate voice. Please try again.')}
-      />
+      {audioUrl && (
+        <audio
+          ref={audioRef}
+          src={audioUrl}
+          preload="auto"
+          className="hidden"
+          onPlay={() => setIsPlaying(true)}
+          onPause={() => setIsPlaying(false)}
+          onEnded={() => setIsPlaying(false)}
+          onError={() => setError('Unable to generate voice. Please try again.')}
+        />
+      )}
 
       {error && <p className="mt-5 text-base text-signal font-semibold">{error}</p>}
     </main>
