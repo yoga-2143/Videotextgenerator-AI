@@ -116,7 +116,7 @@ class YouTubeCaptionProvider(TranscriptProvider):
 
 
 class AlternativeTranscriptProvider(TranscriptProvider):
-    """Integrates third-party YouTube transcript services (Supadata API, RapidAPI, or microservice proxy)."""
+    """Integrates third-party YouTube transcript services (Supadata API, RapidAPI, microservice proxy, or public timedtext proxy)."""
     name: str = "alternative_api"
 
     def __init__(self):
@@ -125,14 +125,10 @@ class AlternativeTranscriptProvider(TranscriptProvider):
         self.proxy_url = os.getenv("YOUTUBE_TRANSCRIPT_PROXY_URL", "").strip()
 
     def is_available(self) -> bool:
-        return bool(self.supadata_api_key or self.alternative_api_url or self.proxy_url)
+        return True
 
     def fetch(self, video_id: str, request_id: Optional[str] = None) -> Optional[TranscriptResult]:
         req_id = request_id or str(uuid.uuid4())
-        if not self.is_available():
-            logger.info(f"[PROVIDER_SKIP] Provider=alternative_api | Reason=NO_API_KEY_OR_PROXY_CONFIGURED")
-            return None
-
         logger.info(f"[PROVIDER_ATTEMPT] Provider=alternative_api | JobID={req_id[:8]} | VideoID={video_id}")
 
         # Option A: Supadata API (https://api.supadata.ai/v1/youtube/transcript)
@@ -196,6 +192,32 @@ class AlternativeTranscriptProvider(TranscriptProvider):
                             return res
             except Exception as e:
                 logger.warning(f"[PROVIDER_FAILED] Provider=alternative_api (Microservice) | JobID={req_id[:8]} | Error={e}")
+
+        # Option C: Public Timedtext Proxy Fallback (bypasses datacenter IP blocks)
+        try:
+            timedtext_url = f"https://www.youtube.com/api/timedtext?v={video_id}&lang=en"
+            proxy_endpoint = f"https://api.allorigins.win/raw?url={requests.utils.quote(timedtext_url)}"
+            r = requests.get(proxy_endpoint, timeout=15)
+            if r.status_code == 200 and "<text" in r.text:
+                import xml.etree.ElementTree as ET
+                root = ET.fromstring(r.text)
+                chunks = [t.text.strip() for t in root.findall(".//text") if t.text and t.text.strip()]
+                raw_text = " ".join(chunks)
+                if raw_text:
+                    from app.services.transcript_service import clean_transcript
+                    cleaned = clean_transcript(raw_text)
+                    res = TranscriptResult(
+                        video_id=video_id,
+                        source="alternative_api",
+                        source_language="en",
+                        transcript_text=cleaned,
+                        confidence=0.95,
+                    )
+                    if validate_transcript(res, video_id):
+                        logger.info(f"[PROVIDER_SUCCESS] Provider=alternative_api (Public Proxy) | JobID={req_id[:8]} | VideoID={video_id}")
+                        return res
+        except Exception as e:
+            logger.warning(f"[PROVIDER_FAILED] Provider=alternative_api (Public Proxy) | JobID={req_id[:8]} | Error={e}")
 
         return None
 

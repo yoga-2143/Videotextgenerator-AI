@@ -89,19 +89,31 @@ export default function YoutubeUrl() {
     try {
       const videoId = extractVideoId(urlStr)
       if (!videoId) return null
-      const res = await fetch(`https://www.youtube.com/api/timedtext?v=${videoId}&lang=en`, { signal: AbortSignal.timeout(3000) }).catch(() => null)
-      if (res && res.ok) {
-        const xml = await res.text().catch(() => '')
-        if (xml && xml.includes('<text')) {
-          const matches = [...xml.matchAll(/<text[^>]*>(.*?)<\/text>/gs)]
-          const text = matches
-            .map(m => m[1].replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").trim())
-            .filter(Boolean)
-            .join(' ')
-          if (text && text.length > 10) {
-            return text
+      
+      const timedtextUrl = `https://www.youtube.com/api/timedtext?v=${videoId}&lang=en`
+      const proxyUrls = [
+        `https://api.allorigins.win/raw?url=${encodeURIComponent(timedtextUrl)}`,
+        `https://corsproxy.io/?${encodeURIComponent(timedtextUrl)}`,
+        timedtextUrl
+      ]
+
+      for (const targetUrl of proxyUrls) {
+        try {
+          const res = await fetch(targetUrl, { signal: AbortSignal.timeout(4000) }).catch(() => null)
+          if (res && res.ok) {
+            const xml = await res.text().catch(() => '')
+            if (xml && xml.includes('<text')) {
+              const matches = [...xml.matchAll(/<text[^>]*>(.*?)<\/text>/gs)]
+              const text = matches
+                .map(m => m[1].replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").trim())
+                .filter(Boolean)
+                .join(' ')
+              if (text && text.length > 10) {
+                return text
+              }
+            }
           }
-        }
+        } catch (err) {}
       }
     } catch (e) {}
     return null
