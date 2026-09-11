@@ -289,56 +289,22 @@ def fetch_transcript(video_id: str, request_id: str = None, timeout_seconds: int
             raise TranscriptError("TRANSCRIPT_FETCH_TIMEOUT", "Retrieving captions timed out. Processing audio fallback.")
 
 
+def get_transcript_result(video_id: str, request_id: str = None, on_audio_fallback=None, on_whisper_transcribe=None, on_progress=None):
+    from app.services.transcript_providers import TranscriptProviderChain, TranscriptResult
+    chain = TranscriptProviderChain()
+    return chain.execute(video_id, request_id, on_audio_fallback, on_whisper_transcribe, on_progress)
+
+
 def get_transcript(video_id: str, request_id: str = None, on_audio_fallback=None, on_whisper_transcribe=None, on_progress=None):
     """Primary entry point used by the video-processing route.
-    Guarantees automatic continuation to audio extraction and Whisper STT fallback
-    whenever captions are unavailable on accessible videos."""
-    req_id = request_id or str(uuid.uuid4())
-    logger.info(f"[TRANSCRIPT_LOOKUP_STARTED] JobID={req_id[:8]} | VideoID={video_id}")
-    try:
-        raw_text, lang = fetch_transcript(video_id, req_id)
-        cleaned = clean_transcript(raw_text)
-        if cleaned:
-            logger.info(f"[CAPTIONS_FOUND] JobID={req_id[:8]} | VideoID={video_id} | Language={lang}")
-            if callable(on_progress):
-                on_progress(85, "Transcript completed")
-            return cleaned, lang, "captions"
-    except TranscriptError as e:
-        logger.warning(f"[CAPTIONS_NOT_FOUND] JobID={req_id[:8]} | VideoID={video_id} | Code={e.code} | Message={e.message}")
-        if e.code in ["VIDEO_PRIVATE", "INVALID_URL", "VIDEO_UNAVAILABLE", "VIDEO_AGE_RESTRICTED", "BOT_PROTECTION_BLOCKED", "PROVIDER_RATE_LIMIT"]:
-            raise
-        if not WHISPER_FALLBACK_ENABLED:
-            raise
-    except Exception as e:
-        logger.exception(f"[CAPTIONS_NOT_FOUND] JobID={req_id[:8]} | VideoID={video_id} | Code=UNEXPECTED_ERROR | Message={e}")
-        if not WHISPER_FALLBACK_ENABLED:
-            raise TranscriptError("TRANSCRIPT_UNAVAILABLE", "No transcript was available, and audio transcription could not be completed.")
-
-    # MANDATORY FALLBACK: Try audio extraction & faster-whisper
-    logger.info(f"[FALLBACK] starting audio extraction | ReqID={req_id[:8]} | video={video_id}")
-    if callable(on_audio_fallback):
+    Delegates to TranscriptProviderChain to try YouTube captions, alternative APIs, and Whisper fallback."""
+    res = get_transcript_result(video_id, request_id, on_audio_fallback, on_whisper_transcribe, on_progress)
+    if callable(on_progress):
         try:
-            on_audio_fallback()
+            on_progress(85, "Transcript completed")
         except Exception:
             pass
-
-    from app.services.whisper_service import transcribe_with_whisper, WhisperError
-    try:
-        if callable(on_whisper_transcribe):
-            try:
-                on_whisper_transcribe()
-            except Exception:
-                pass
-        raw_text, lang = transcribe_with_whisper(video_id, request_id=req_id, job_id=req_id, on_progress=on_progress)
-        cleaned_text = clean_transcript(raw_text)
-        logger.info(f"[WHISPER_TRANSCRIPTION_COMPLETED] JobID={req_id[:8]} | VideoID={video_id}")
-        return cleaned_text, lang, "whisper"
-    except WhisperError as e:
-        logger.warning(f"[FALLBACK_FAILED] ReqID={req_id[:8]} | video={video_id} | WhisperError: {e.code} - {e.message}")
-        raise TranscriptError(e.code, e.message)
-    except Exception as e:
-        logger.exception(f"[FALLBACK_FAILED] ReqID={req_id[:8]} | Unexpected Whisper fallback failure for video {video_id}: {e}")
-        raise TranscriptError("WHISPER_TRANSCRIPTION_FAILED", "Audio was obtained, but speech transcription failed.")
+    return res.transcript_text, res.source_language, res.source
 
 
 from app.services.error_validator import contains_raw_error_text
