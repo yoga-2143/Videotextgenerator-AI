@@ -3,6 +3,7 @@ import re
 import time
 import uuid
 import logging
+import html
 from youtube_transcript_api import YouTubeTranscriptApi, TranscriptsDisabled, NoTranscriptFound, VideoUnavailable
 
 logger = logging.getLogger(__name__)
@@ -330,7 +331,9 @@ def clean_transcript(raw_text: str) -> str:
     if not raw_text or contains_raw_error_text(raw_text):
         raise TranscriptError("TRANSCRIPT_UNAVAILABLE", "This video does not have an accessible transcript or captions, so it cannot currently be converted to text.")
 
-    text = raw_text
+    # 0. Unescape HTML entities & strip YouTube speaker change markers (>> / >>>)
+    text = html.unescape(raw_text)
+    text = re.sub(r"(?:^|\n|\s)>>+\s*", " ", text)
 
     # 1. Remove timestamps like [00:12], (1:23), 04:56
     text = re.sub(r"\[?\b\d{1,2}:\d{2}(:\d{2})?\b\]?", "", text)

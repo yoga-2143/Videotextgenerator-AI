@@ -11,6 +11,7 @@ import urllib.request
 import urllib.parse
 import json
 import logging
+import html
 from deep_translator import GoogleTranslator
 from app.services.language_config import get_all_supported_languages, is_translation_supported, get_language_config
 from app.services.error_validator import contains_raw_error_text
@@ -118,6 +119,9 @@ def _translate_single_chunk(chunk: str, target_lang: str, source_lang: str = "au
 def _clean_translated_formatting(text: str) -> str:
     if not text:
         return text or ""
+    # Safely unescape HTML entities in translated text & strip speaker tags
+    text = html.unescape(text)
+    text = re.sub(r"(?:^|\n|\s)>>+\s*", " ", text)
     # Normalize bullet point formatting
     text = re.sub(r"^\s*•\s*", "• ", text, flags=re.MULTILINE)
     # Normalize unbroken domain names & URLs (e.g. indiaabigs . com -> indiaabigs.com)

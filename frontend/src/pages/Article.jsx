@@ -26,8 +26,23 @@ const SECTION_HEADINGS = {
   ru: 'ВАЖНОЕ СОДЕРЖАНИЕ',
 }
 
-function renderTextWithLinks(text) {
-  if (!text) return text
+function decodeHTMLEntities(text) {
+  if (!text || typeof text !== 'string') return text || ''
+  const decoded = text
+    .replace(/&gt;/g, '>')
+    .replace(/&lt;/g, '<')
+    .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&#x27;/g, "'")
+    .replace(/&#x2F;/g, '/')
+    .replace(/&nbsp;/g, ' ')
+  return decoded.replace(/(?:^|\s)>>+\s*/g, ' ').trim()
+}
+
+function renderTextWithLinks(rawText) {
+  if (!rawText) return rawText
+  const text = decodeHTMLEntities(rawText)
   const urlRegex = /(https?:\/\/[^\s]+|www\.[^\s]+|\b[a-zA-Z0-9\-]+\.(?:com|org|net|in|io|ai|co|gov|edu)\b)/g
   const parts = text.split(urlRegex)
   if (parts.length === 1) return text
@@ -668,7 +683,10 @@ export default function Article() {
           onPlay={() => setIsPlaying(true)}
           onPause={() => setIsPlaying(false)}
           onEnded={() => setIsPlaying(false)}
-          onError={() => setError('Unable to generate voice. Please try again.')}
+          onError={() => {
+            setError('Unable to generate voice. Please try again.')
+            setAudioNotice('')
+          }}
         />
       )}
 

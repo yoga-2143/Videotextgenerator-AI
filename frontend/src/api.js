@@ -132,7 +132,27 @@ export const api = {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...authHeaders() },
         body: JSON.stringify({ language }),
-      }).then(handle)
+      })
+        .then(handle)
+        .then(res => {
+          if (res && (res.audioUrl || res.audio_url)) {
+            const rawUrl = res.audioUrl || res.audio_url
+            if (rawUrl && rawUrl.startsWith('/')) {
+              let backendOrigin = ''
+              if (BASE.startsWith('http')) {
+                backendOrigin = new URL(BASE).origin
+              } else if (import.meta.env.VITE_API_BASE_URL && import.meta.env.VITE_API_BASE_URL.startsWith('http')) {
+                backendOrigin = new URL(import.meta.env.VITE_API_BASE_URL).origin
+              } else {
+                backendOrigin = 'https://vetri-backend-tyv7.onrender.com'
+              }
+              const fullUrl = `${backendOrigin}${rawUrl}`
+              res.audioUrl = fullUrl
+              res.audio_url = fullUrl
+            }
+          }
+          return res
+        })
     ),
 
   getArticle: (id) => fetch(`${BASE}/articles/${id}`, { headers: authHeaders() }).then(handle),

@@ -8,6 +8,7 @@ import os
 import re
 import json
 import logging
+import html
 from app.services.error_validator import contains_raw_error_text
 
 logger = logging.getLogger(__name__)
@@ -69,7 +70,8 @@ CONTEXT_YOGA_KEYWORDS = {"yoga", "sutra", "sutras", "patanjali", "philosophy", "
 def clean_speech_sentence(sentence: str, full_context: str = "") -> str:
     if not sentence or not isinstance(sentence, str):
         return ""
-    s = sentence.strip()
+    s = html.unescape(sentence.strip())
+    s = re.sub(r"(?:^|\n|\s)>>+\s*", " ", s)
     context_lower = f"{s} {full_context}".lower()
 
     # 1. Remove bracketed audio noise tags like [Music], (Laughter), [Applause]
@@ -468,7 +470,8 @@ def article_to_plain_text(article: dict) -> str:
     for section in sections:
         body = section.get('body', '').strip()
         if body:
-            clean_body = body
+            clean_body = html.unescape(body)
+            clean_body = re.sub(r"(?:^|\n|\s)>>+\s*", " ", clean_body)
             # Strip any repeated header text or artificial key point/chapter labels
             clean_body = re.sub(r"^IMPORTANT CONTENT\s*", "", clean_body, flags=re.IGNORECASE).strip()
             clean_body = re.sub(r"(?i)\bKey\s*Point\s*\d*:?\s*", "", clean_body)
