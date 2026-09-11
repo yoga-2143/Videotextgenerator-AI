@@ -64,6 +64,51 @@ def extract_video_id(url: str) -> str:
     raise TranscriptError("INVALID_URL", "Invalid YouTube URL format. Please paste a valid link (e.g. https://www.youtube.com/watch?v=dQw4w9WgXcQ).")
 
 
+def _get_configured_session():
+    import requests
+    s = requests.Session()
+    s.headers.update({
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        "Accept-Language": "en-US,en;q=0.9",
+    })
+    return s
+
+
+def fetch_direct_innertube_captions(video_id: str, session=None):
+    """Fallback extractor that parses captionTracks directly from YouTube video page HTML."""
+    import requests, re, json, xml.etree.ElementTree as ET
+    s = session or _get_configured_session()
+    try:
+        r = s.get(f"https://www.youtube.com/watch?v={video_id}", timeout=15)
+        if r.status_code != 200:
+            return None, None
+        match = re.search(r'"captionTracks":\s*(\[.*?\])', r.text)
+        if not match:
+            return None, None
+        tracks = json.loads(match.group(1))
+        if not tracks:
+            return None, None
+        track = tracks[0]
+        for t in tracks:
+            if t.get("languageCode", "").startswith("en"):
+                track = t
+                break
+        base_url = track.get("baseUrl")
+        lang = track.get("languageCode", "en")
+        if not base_url:
+            return None, None
+        r_xml = s.get(base_url, timeout=15)
+        if r_xml.status_code == 200 and r_xml.text.strip():
+            root = ET.fromstring(r_xml.text)
+            chunks = [t.text.strip() for t in root.findall(".//text") if t.text and t.text.strip()]
+            full_text = " ".join(chunks)
+            if full_text:
+                return full_text, lang
+    except Exception as e:
+        logger.debug(f"[INNER_TUBE_CAPTIONS_NOTE] Direct HTML extraction note for {video_id}: {e}")
+    return None, None
+
+
 def fetch_transcript(video_id: str, request_id: str = None, timeout_seconds: int = 45):
     """Returns (raw_text, detected_language_code).
     Single-pass transcript list extraction with structured provider metrics, rate limit protection, and timeout control."""
@@ -76,12 +121,36 @@ def fetch_transcript(video_id: str, request_id: str = None, timeout_seconds: int
 
         logger.info(f"[TRANSCRIPT_LOOKUP_STARTED] JobID={req_id[:8]} | VideoID={video_id}")
 
+        session = _get_configured_session()
+
+        # Pass 1: Direct ytt.fetch call with browser session
+        try:
+            ytt_direct = YouTubeTranscriptApi(http_client=session)
+            if hasattr(ytt_direct, "fetch"):
+                res_direct = ytt_direct.fetch(video_id, languages=("en", "en-US", "en-GB", "de", "es", "fr", "hi", "ta", "ja"))
+                snippets = [getattr(c, "text", str(c)).strip() for c in res_direct if hasattr(c, "text") and getattr(c, "text", "").strip()]
+                if snippets:
+                    text = " ".join(snippets)
+                    lang = getattr(res_direct, "language_code", "en")
+                    logger.info(f"[CAPTIONS_FOUND] JobID={req_id[:8]} | VideoID={video_id} | Language={lang} (ytt_direct_fetch)")
+                    return text, lang
+        except (VideoUnavailable, TranscriptsDisabled, NoTranscriptFound) as known_err:
+            pass
+        except Exception as direct_err:
+            logger.debug(f"[TRANSCRIPT] Direct fetch note for {video_id}: {direct_err}")
+
+        # Pass 2: List transcripts with browser session
+        transcript_list = None
         try:
             if hasattr(YouTubeTranscriptApi, "list_transcripts"):
                 list_func = getattr(YouTubeTranscriptApi, "list_transcripts")
-                transcript_list = list_func(video_id)
+                try:
+                    transcript_list = list_func(video_id)
+                except TypeError:
+                    ytt = YouTubeTranscriptApi(http_client=session)
+                    transcript_list = ytt.list(video_id)
             else:
-                ytt = YouTubeTranscriptApi()
+                ytt = YouTubeTranscriptApi(http_client=session)
                 transcript_list = ytt.list(video_id)
 
             elapsed = round((time.time() - t0) * 1000, 2)
@@ -126,97 +195,87 @@ def fetch_transcript(video_id: str, request_id: str = None, timeout_seconds: int
                 raise TranscriptError("VIDEO_UNAVAILABLE", "This YouTube video is unavailable, deleted, or does not exist.")
 
             log_provider_call(req_id, video_id, "youtube_transcript_api", "list_transcripts", attempt, elapsed, 500, err_type)
-            raise TranscriptError("TRANSCRIPT_UNAVAILABLE", f"No transcript was available: {e}")
 
-        # Multi-stage caption discovery: prefer manual English -> any manual -> generated English -> any generated -> direct API
+        # Multi-stage caption discovery if transcript_list was obtained
         transcript = None
-        try:
-            transcript = transcript_list.find_transcript(["en", "en-US", "en-GB"])
-        except Exception:
-            pass
-
-        if not transcript:
+        if transcript_list:
             try:
-                for t in transcript_list:
-                    if not getattr(t, "is_generated", False):
+                transcript = transcript_list.find_transcript(["en", "en-US", "en-GB"])
+            except Exception:
+                pass
+
+            if not transcript:
+                try:
+                    for t in transcript_list:
+                        if not getattr(t, "is_generated", False):
+                            transcript = t
+                            break
+                except Exception:
+                    pass
+
+            if not transcript:
+                try:
+                    transcript = transcript_list.find_generated_transcript(["en", "en-US", "en-GB"])
+                except Exception:
+                    pass
+
+            if not transcript:
+                try:
+                    for t in transcript_list:
+                        if getattr(t, "is_generated", False):
+                            transcript = t
+                            break
+                except Exception:
+                    pass
+
+            if not transcript:
+                manual_map = getattr(transcript_list, "_manually_created_transcripts", {})
+                if manual_map:
+                    transcript = next(iter(manual_map.values()), None)
+
+            if not transcript:
+                generated_map = getattr(transcript_list, "_generated_transcripts", {})
+                if generated_map:
+                    transcript = next(iter(generated_map.values()), None)
+
+            if not transcript:
+                try:
+                    for t in transcript_list:
                         transcript = t
                         break
-            except Exception:
-                pass
+                except Exception:
+                    pass
 
-        if not transcript:
+        if transcript:
+            t0_fetch = time.time()
             try:
-                transcript = transcript_list.find_generated_transcript(["en", "en-US", "en-GB"])
-            except Exception:
-                pass
+                data = transcript.fetch()
+                elapsed_fetch = round((time.time() - t0_fetch) * 1000, 2)
+                log_provider_call(req_id, video_id, "youtube_transcript_api", "fetch_chunks", 1, elapsed_fetch, 200)
 
-        if not transcript:
-            try:
-                for t in transcript_list:
-                    if getattr(t, "is_generated", False):
-                        transcript = t
-                        break
-            except Exception:
-                pass
+                chunks = []
+                for chunk in data:
+                    txt = (chunk.get("text", "") if isinstance(chunk, dict) else getattr(chunk, "text", "")).strip()
+                    if txt:
+                        chunks.append(txt)
+                text = " ".join(chunks)
+                if text:
+                    lang = getattr(transcript, "language_code", "en")
+                    logger.info(f"[CAPTIONS_FOUND] JobID={req_id[:8]} | VideoID={video_id} | Language={lang}")
+                    return text, lang
+            except Exception as e:
+                elapsed_fetch = round((time.time() - t0_fetch) * 1000, 2)
+                log_provider_call(req_id, video_id, "youtube_transcript_api", "fetch_chunks", 1, elapsed_fetch, 500, type(e).__name__)
+                logger.warning(f"[CAPTIONS_NOT_FOUND] JobID={req_id[:8]} | VideoID={video_id} | Code=FETCH_CHUNKS_FAILED | Message={e}")
 
-        if not transcript:
-            manual_map = getattr(transcript_list, "_manually_created_transcripts", {})
-            if manual_map:
-                transcript = next(iter(manual_map.values()), None)
+        # Pass 3: Direct InnerTube HTML caption parsing fallback
+        html_text, html_lang = fetch_direct_innertube_captions(video_id, session=session)
+        if html_text:
+            logger.info(f"[CAPTIONS_FOUND] JobID={req_id[:8]} | VideoID={video_id} | Language={html_lang} (direct_innertube_html)")
+            return html_text, html_lang
 
-        if not transcript:
-            generated_map = getattr(transcript_list, "_generated_transcripts", {})
-            if generated_map:
-                transcript = next(iter(generated_map.values()), None)
-
-        if not transcript:
-            try:
-                for t in transcript_list:
-                    transcript = t
-                    break
-            except Exception:
-                pass
-
-        # Direct API fallback if list_transcripts did not yield a track object
-        if not transcript:
-            try:
-                if hasattr(YouTubeTranscriptApi, "get_transcript"):
-                    direct_data = YouTubeTranscriptApi.get_transcript(video_id)
-                    chunks = [c.get("text", "").strip() for c in direct_data if isinstance(c, dict) and c.get("text", "").strip()]
-                    if chunks:
-                        text = " ".join(chunks)
-                        logger.info(f"[CAPTIONS_FOUND] JobID={req_id[:8]} | VideoID={video_id} | Language=en (direct_get_transcript)")
-                        return text, "en"
-            except Exception as direct_err:
-                logger.debug(f"[TRANSCRIPT] Direct get_transcript note: {direct_err}")
-
-        if not transcript:
-            logger.warning(f"[CAPTIONS_NOT_FOUND] JobID={req_id[:8]} | VideoID={video_id} | Code=NO_MATCHING_TRACK")
-            raise TranscriptError("TRANSCRIPT_UNAVAILABLE", "No transcript was available, and audio transcription could not be completed.")
-
-        t0_fetch = time.time()
-        try:
-            data = transcript.fetch()
-            elapsed_fetch = round((time.time() - t0_fetch) * 1000, 2)
-            log_provider_call(req_id, video_id, "youtube_transcript_api", "fetch_chunks", 1, elapsed_fetch, 200)
-
-            chunks = []
-            for chunk in data:
-                txt = (chunk.get("text", "") if isinstance(chunk, dict) else getattr(chunk, "text", "")).strip()
-                if txt:
-                    chunks.append(txt)
-            text = " ".join(chunks)
-            if not text:
-                logger.warning(f"[CAPTIONS_NOT_FOUND] JobID={req_id[:8]} | VideoID={video_id} | Code=EMPTY_CAPTION_CHUNKS")
-                raise TranscriptError("TRANSCRIPT_UNAVAILABLE", "No transcript was available, and audio transcription could not be completed.")
-            lang = getattr(transcript, "language_code", "en")
-            logger.info(f"[CAPTIONS_FOUND] JobID={req_id[:8]} | VideoID={video_id} | Language={lang}")
-            return text, lang
-        except Exception as e:
-            elapsed_fetch = round((time.time() - t0_fetch) * 1000, 2)
-            log_provider_call(req_id, video_id, "youtube_transcript_api", "fetch_chunks", 1, elapsed_fetch, 500, type(e).__name__)
-            logger.warning(f"[CAPTIONS_NOT_FOUND] JobID={req_id[:8]} | VideoID={video_id} | Code=FETCH_CHUNKS_FAILED | Message={e}")
-            raise TranscriptError("TRANSCRIPT_UNAVAILABLE", f"No transcript was available: {e}")
+        logger.warning(f"[CAPTIONS_NOT_FOUND] JobID={req_id[:8]} | VideoID={video_id} | Code=NO_MATCHING_TRACK")
+        raise TranscriptError("TRANSCRIPT_UNAVAILABLE", "No transcript was available, and audio transcription could not be completed.")
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
         future = executor.submit(_internal_fetch)

@@ -137,6 +137,15 @@ def _download_full_audio(video_id: str, workdir: str) -> str:
         "prefer_insecure": True,
         "geo_bypass": True,
         "concurrent_fragment_downloads": 8,
+        "extractor_args": {
+            "youtube": {
+                "player_client": ["mweb", "android", "ios", "web"]
+            }
+        },
+        "http_headers": {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+            "Accept-Language": "en-US,en;q=0.9",
+        },
         "postprocessors": [{
             "key": "FFmpegExtractAudio",
             "preferredcodec": "mp3",
