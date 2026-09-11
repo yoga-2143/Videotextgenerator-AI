@@ -12,6 +12,7 @@ import tempfile
 import shutil
 import logging
 import traceback
+import threading
 from threading import Thread
 logger = logging.getLogger(__name__)
 
@@ -22,6 +23,7 @@ WHISPER_COMPUTE_TYPE = os.getenv("WHISPER_COMPUTE_TYPE", "auto")
 _model = None  # pre-warmed singleton instance
 _model_device = None
 _model_compute_type = None
+_model_lock = threading.Lock()
 
 
 class WhisperError(Exception):
@@ -54,39 +56,67 @@ def _detect_compute_config():
     return device, compute_type
 
 
-def _get_model():
+def _get_model(timeout_seconds: int = 90):
     global _model, _model_device, _model_compute_type
-    if _model is None:
+    if _model is not None:
+        return _model
+
+    with _model_lock:
+        if _model is not None:
+            return _model
+
         t0 = time.time()
         device, compute_type = _detect_compute_config()
-        logger.info(f"[WHISPER] model loading started | start_timestamp={t0} | name={WHISPER_MODEL_SIZE} | device={device} | compute_type={compute_type}")
-        try:
-            from faster_whisper import WhisperModel
-            num_threads = max(4, os.cpu_count() or 4)
-            _model = WhisperModel(
-                WHISPER_MODEL_SIZE,
-                device=device,
-                compute_type=compute_type,
-                cpu_threads=num_threads,
-            )
-            _model_device = device
-            _model_compute_type = compute_type
-            t1 = time.time()
-            elapsed = round((t1 - t0) * 1000, 2)
-            logger.info(f"[WHISPER] model loaded | end_timestamp={t1} | duration_ms={elapsed} | device={device} | compute_type={compute_type} | cpu_threads={num_threads}")
-        except Exception as e:
-            t1 = time.time()
-            elapsed = round((t1 - t0) * 1000, 2)
+        logger.info(f"[WHISPER_MODEL_LOADING_STARTED] Model={WHISPER_MODEL_SIZE} | Device={device} | ComputeType={compute_type}")
+
+        model_res = {"model": None, "error": None}
+
+        def _loader():
+            try:
+                from faster_whisper import WhisperModel
+                num_threads = max(4, os.cpu_count() or 4)
+                m = WhisperModel(
+                    WHISPER_MODEL_SIZE,
+                    device=device,
+                    compute_type=compute_type,
+                    cpu_threads=num_threads,
+                )
+                model_res["model"] = m
+            except Exception as e:
+                model_res["error"] = e
+
+        loader_thread = Thread(target=_loader, name="whisper_model_loader", daemon=True)
+        loader_thread.start()
+        loader_thread.join(timeout=timeout_seconds)
+
+        t1 = time.time()
+        elapsed = round((t1 - t0) * 1000, 2)
+
+        if loader_thread.is_alive():
+            logger.error(f"[WHISPER_MODEL_LOADING_FAILED] Duration={elapsed}ms | Error=Timeout after {timeout_seconds}s")
+            raise WhisperError("WHISPER_MODEL_TIMEOUT", f"Whisper AI model loading timed out after {timeout_seconds} seconds.")
+
+        if model_res["error"]:
             err_trace = traceback.format_exc()
-            logger.error(f"[WHISPER] ERROR model loading failed | duration_ms={elapsed} | error={e}\nTraceback:\n{err_trace}")
-            raise WhisperError("WHISPER_INIT_FAILED", f"Failed to initialize Whisper model: {e}")
-    return _model
+            logger.error(f"[WHISPER_MODEL_LOADING_FAILED] Duration={elapsed}ms | Error={model_res['error']}\nTraceback:\n{err_trace}")
+            raise WhisperError("WHISPER_INIT_FAILED", f"Failed to initialize Whisper model: {model_res['error']}")
+
+        _model = model_res["model"]
+        _model_device = device
+        _model_compute_type = compute_type
+        logger.info(f"[WHISPER_MODEL_LOADING_COMPLETED] Duration={elapsed}ms | Model={WHISPER_MODEL_SIZE} | Device={device}")
+        return _model
 
 
 def prewarm_whisper_model():
     """Pre-warms the Whisper model singleton during backend startup so first-request latency is zero."""
     try:
-        _get_model()
+        def _bg_prewarm():
+            try:
+                _get_model(timeout_seconds=60)
+            except Exception as e:
+                logger.warning(f"[WHISPER] model pre-warm background note: {e}")
+        Thread(target=_bg_prewarm, name="whisper_prewarm", daemon=True).start()
     except Exception as e:
         logger.warning(f"[WHISPER] model pre-warm skipped or failed: {e}")
 
@@ -177,11 +207,12 @@ def transcribe_with_whisper(video_id: str, request_id: str = None, job_id: str =
             if callable(on_progress):
                 on_progress("LOADING_WHISPER", 45, "Loading Whisper AI speech-to-text model...")
 
+            logger.info(f"[WHISPER_MODEL_LOADING_STARTED] JobID={req_id[:8]} | VideoID={video_id}")
             model = _get_model()
             last_progress_time[0] = time.time()
 
             t_tr0 = time.time()
-            logger.info(f"[WHISPER] transcribe started | request_id={req_id} | job_id={job_id} | start_timestamp={t_tr0} | video={video_id}")
+            logger.info(f"[WHISPER_TRANSCRIPTION_STARTED] JobID={req_id[:8]} | VideoID={video_id} | Start={t_tr0}")
             # Fast greedy decoding with temperature=0.0 to prevent 6x retries on silence/music windows
             try:
                 segments, info = model.transcribe(
@@ -258,7 +289,7 @@ def transcribe_with_whisper(video_id: str, request_id: str = None, job_id: str =
                 return
 
             total_elapsed = round((time.time() - t_start) * 1000, 2)
-            logger.info(f"[WHISPER] transcription completed | request_id={req_id} | end_timestamp={time.time()} | total_duration_ms={total_elapsed} | text_len={len(full_text)}")
+            logger.info(f"[WHISPER_TRANSCRIPTION_COMPLETED] JobID={req_id[:8]} | VideoID={video_id} | Duration={total_elapsed}ms | TextLen={len(full_text)}")
 
             if callable(on_progress):
                 on_progress("CLEANING_TEXT", 85, "Cleaning transcript content...")
@@ -277,8 +308,7 @@ def transcribe_with_whisper(video_id: str, request_id: str = None, job_id: str =
     worker_thread.start()
 
     # Stall detection loop: monitors progress every 2 seconds
-    # Supports long 1hr-10hr YouTube videos without timing out if active progress continues
-    STALL_TIMEOUT_SECONDS = 600      # 10 mins without any segment progress
+    STALL_TIMEOUT_SECONDS = 90       # 90s without any segment progress update
     MAX_TOTAL_LIMIT_SECONDS = 36000  # 10 hours total cap for ultra-long videos
 
     while worker_thread.is_alive():
@@ -287,8 +317,8 @@ def transcribe_with_whisper(video_id: str, request_id: str = None, job_id: str =
         total_time = now - t_start
 
         if time_since_last_progress > STALL_TIMEOUT_SECONDS:
-            logger.warning(f"[WHISPER] ERROR stalled process detected: no segment progress for {round(time_since_last_progress, 1)}s for video {video_id}")
-            result_container["error"] = WhisperError("WHISPER_STALLED", "Speech-to-text transcription stalled. Please try again.")
+            logger.warning(f"[WHISPER] ERROR stalled process detected: no progress for {round(time_since_last_progress, 1)}s for video {video_id}")
+            result_container["error"] = WhisperError("WHISPER_TIMEOUT", "Speech-to-text processing took too long. Please try again.")
             break
 
         if total_time > MAX_TOTAL_LIMIT_SECONDS:
@@ -305,3 +335,4 @@ def transcribe_with_whisper(video_id: str, request_id: str = None, job_id: str =
         return result_container["data"]
 
     raise WhisperError("WHISPER_TRANSCRIPTION_FAILED", "Whisper transcription ended without returning data.")
+

@@ -285,15 +285,18 @@ def set_job_result(job_id: str, result_data: dict):
             job = VIDEO_JOBS[job_id]
             if job.get("cancelled"):
                 return
+            now = time.time()
+            t_start = job.get("created_at", now)
+            duration_ms = round((now - t_start) * 1000, 2)
             job["result"] = result_data
             job["result_available"] = True
             job["status"] = "completed"
             job["stage"] = JobStage.COMPLETED
             job["progress"] = 100
             job["message"] = STAGE_MESSAGES[JobStage.COMPLETED]
-            job["updated_at"] = time.time()
+            job["updated_at"] = now
             _sync_job_to_db(job)
-            logger.info(f"[JOB_SUCCESS] JobID={job_id} | Result payload attached.")
+            logger.info(f"[JOB_COMPLETED] JobID={job_id} | TotalDuration={duration_ms}ms | Result payload attached.")
 
 
 def set_job_error(job_id: str, error_code: str, user_message: str, retryable: bool = True):
@@ -306,6 +309,9 @@ def set_job_error(job_id: str, error_code: str, user_message: str, retryable: bo
             job = VIDEO_JOBS[job_id]
             if job.get("cancelled"):
                 return
+            now = time.time()
+            t_start = job.get("created_at", now)
+            duration_ms = round((now - t_start) * 1000, 2)
             job["error"] = {
                 "code": error_code,
                 "message": user_message,
@@ -315,12 +321,12 @@ def set_job_error(job_id: str, error_code: str, user_message: str, retryable: bo
             job["stage"] = JobStage.FAILED
             job["progress"] = 0
             job["message"] = user_message
-            job["updated_at"] = time.time()
+            job["updated_at"] = now
             _sync_job_to_db(job)
             if error_code == "DATABASE_TEARDOWN":
-                logger.debug(f"[JOB_FAILED] JobID={job_id} | Code={error_code} | Message='{user_message}'")
+                logger.debug(f"[JOB_FAILED] JobID={job_id} | Duration={duration_ms}ms | Code={error_code} | Message='{user_message}'")
             else:
-                logger.error(f"[JOB_FAILED] JobID={job_id} | Code={error_code} | Message='{user_message}'")
+                logger.error(f"[JOB_FAILED] JobID={job_id} | Duration={duration_ms}ms | Code={error_code} | Message='{user_message}'")
 
 
 def cancel_job(job_id: str) -> bool:
@@ -357,12 +363,32 @@ def is_job_cancelled(job_id: str) -> bool:
 
 def get_job_state(job_id: str) -> dict:
     with JOBS_LOCK:
-        if job_id in VIDEO_JOBS:
-            return dict(VIDEO_JOBS[job_id])
-        db_job = _get_job_from_db(job_id)
-        if db_job:
-            VIDEO_JOBS[job_id] = db_job
-            return dict(db_job)
+        job = VIDEO_JOBS.get(job_id)
+        if not job:
+            job = _get_job_from_db(job_id)
+            if job:
+                VIDEO_JOBS[job_id] = job
+
+        if job:
+            # Stale job watchdog guard: if status is processing but no update for 300s, auto-fail
+            now = time.time()
+            updated_at = job.get("updated_at", now)
+            if job.get("status") == "processing" and (now - updated_at) > 300:
+                logger.warning(f"[STALE_JOB_WATCHDOG] JobID={job_id} stalled for {round(now - updated_at, 1)}s. Auto-failing.")
+                job["status"] = "failed"
+                job["stage"] = JobStage.FAILED
+                job["progress"] = 0
+                job["message"] = "Processing job timed out. Please try again."
+                job["error"] = {
+                    "code": "JOB_STALLED",
+                    "message": "Processing job timed out. Please try again.",
+                    "retryable": True
+                }
+                job["updated_at"] = now
+                _sync_job_to_db(job)
+
+            return dict(job)
+
         return None
 
 

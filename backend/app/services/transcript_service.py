@@ -74,7 +74,7 @@ def fetch_transcript(video_id: str, request_id: str = None, timeout_seconds: int
         t0 = time.time()
         attempt = 1
 
-        logger.info(f"[TRANSCRIPT] fetch started | video_id={video_id}")
+        logger.info(f"[TRANSCRIPT_LOOKUP_STARTED] JobID={req_id[:8]} | VideoID={video_id}")
 
         try:
             if hasattr(YouTubeTranscriptApi, "list_transcripts"):
@@ -91,26 +91,26 @@ def fetch_transcript(video_id: str, request_id: str = None, timeout_seconds: int
             err_str = str(e).lower()
             if "private" in err_str:
                 log_provider_call(req_id, video_id, "youtube_transcript_api", "list_transcripts", attempt, elapsed, 403, "VIDEO_PRIVATE")
-                logger.warning(f"[TRANSCRIPT] failed: VideoUnavailable ({e})")
+                logger.warning(f"[CAPTIONS_NOT_FOUND] JobID={req_id[:8]} | VideoID={video_id} | Code=VIDEO_PRIVATE | Message={e}")
                 raise TranscriptError("VIDEO_PRIVATE", "This video is private and cannot be processed.")
             log_provider_call(req_id, video_id, "youtube_transcript_api", "list_transcripts", attempt, elapsed, 404, "VIDEO_UNAVAILABLE")
-            logger.warning(f"[TRANSCRIPT] failed: VideoUnavailable ({e})")
+            logger.warning(f"[CAPTIONS_NOT_FOUND] JobID={req_id[:8]} | VideoID={video_id} | Code=VIDEO_UNAVAILABLE | Message={e}")
             raise TranscriptError("VIDEO_UNAVAILABLE", "This YouTube video is unavailable, deleted, or does not exist.")
         except TranscriptsDisabled as e:
             elapsed = round((time.time() - t0) * 1000, 2)
             log_provider_call(req_id, video_id, "youtube_transcript_api", "list_transcripts", attempt, elapsed, 422, "TRANSCRIPT_DISABLED")
-            logger.warning(f"[TRANSCRIPT] failed: TranscriptsDisabled ({e})")
+            logger.warning(f"[CAPTIONS_NOT_FOUND] JobID={req_id[:8]} | VideoID={video_id} | Code=TRANSCRIPT_DISABLED | Message={e}")
             raise TranscriptError("TRANSCRIPT_UNAVAILABLE", "No transcript was available, and audio transcription could not be completed.")
         except NoTranscriptFound as e:
             elapsed = round((time.time() - t0) * 1000, 2)
             log_provider_call(req_id, video_id, "youtube_transcript_api", "list_transcripts", attempt, elapsed, 422, "NO_TRANSCRIPT")
-            logger.warning(f"[TRANSCRIPT] failed: NoTranscriptFound ({e})")
+            logger.warning(f"[CAPTIONS_NOT_FOUND] JobID={req_id[:8]} | VideoID={video_id} | Code=NO_TRANSCRIPT | Message={e}")
             raise TranscriptError("TRANSCRIPT_UNAVAILABLE", "No transcript was available, and audio transcription could not be completed.")
         except Exception as e:
             elapsed = round((time.time() - t0) * 1000, 2)
             err_str = str(e).lower()
             err_type = type(e).__name__
-            logger.warning(f"[TRANSCRIPT] failed: {err_type}: {e}")
+            logger.warning(f"[CAPTIONS_NOT_FOUND] JobID={req_id[:8]} | VideoID={video_id} | Code={err_type} | Message={e}")
 
             if "private video" in err_str or "this video is private" in err_str:
                 log_provider_call(req_id, video_id, "youtube_transcript_api", "list_transcripts", attempt, elapsed, 403, "VIDEO_PRIVATE")
@@ -128,7 +128,7 @@ def fetch_transcript(video_id: str, request_id: str = None, timeout_seconds: int
             log_provider_call(req_id, video_id, "youtube_transcript_api", "list_transcripts", attempt, elapsed, 500, err_type)
             raise TranscriptError("TRANSCRIPT_UNAVAILABLE", f"No transcript was available: {e}")
 
-        # Extract usable transcript track in a single pass
+        # Multi-stage caption discovery: prefer manual English -> any manual -> generated English -> any generated -> direct API
         transcript = None
         try:
             transcript = transcript_list.find_transcript(["en", "en-US", "en-GB"])
@@ -137,7 +137,25 @@ def fetch_transcript(video_id: str, request_id: str = None, timeout_seconds: int
 
         if not transcript:
             try:
-                transcript = transcript_list.find_generated_transcript(["en", "en-US"])
+                for t in transcript_list:
+                    if not getattr(t, "is_generated", False):
+                        transcript = t
+                        break
+            except Exception:
+                pass
+
+        if not transcript:
+            try:
+                transcript = transcript_list.find_generated_transcript(["en", "en-US", "en-GB"])
+            except Exception:
+                pass
+
+        if not transcript:
+            try:
+                for t in transcript_list:
+                    if getattr(t, "is_generated", False):
+                        transcript = t
+                        break
             except Exception:
                 pass
 
@@ -159,8 +177,21 @@ def fetch_transcript(video_id: str, request_id: str = None, timeout_seconds: int
             except Exception:
                 pass
 
+        # Direct API fallback if list_transcripts did not yield a track object
         if not transcript:
-            logger.warning(f"[TRANSCRIPT] failed: No matching language track found in transcript_list")
+            try:
+                if hasattr(YouTubeTranscriptApi, "get_transcript"):
+                    direct_data = YouTubeTranscriptApi.get_transcript(video_id)
+                    chunks = [c.get("text", "").strip() for c in direct_data if isinstance(c, dict) and c.get("text", "").strip()]
+                    if chunks:
+                        text = " ".join(chunks)
+                        logger.info(f"[CAPTIONS_FOUND] JobID={req_id[:8]} | VideoID={video_id} | Language=en (direct_get_transcript)")
+                        return text, "en"
+            except Exception as direct_err:
+                logger.debug(f"[TRANSCRIPT] Direct get_transcript note: {direct_err}")
+
+        if not transcript:
+            logger.warning(f"[CAPTIONS_NOT_FOUND] JobID={req_id[:8]} | VideoID={video_id} | Code=NO_MATCHING_TRACK")
             raise TranscriptError("TRANSCRIPT_UNAVAILABLE", "No transcript was available, and audio transcription could not be completed.")
 
         t0_fetch = time.time()
@@ -176,15 +207,15 @@ def fetch_transcript(video_id: str, request_id: str = None, timeout_seconds: int
                     chunks.append(txt)
             text = " ".join(chunks)
             if not text:
-                logger.warning(f"[TRANSCRIPT] failed: Fetched caption chunks were empty")
+                logger.warning(f"[CAPTIONS_NOT_FOUND] JobID={req_id[:8]} | VideoID={video_id} | Code=EMPTY_CAPTION_CHUNKS")
                 raise TranscriptError("TRANSCRIPT_UNAVAILABLE", "No transcript was available, and audio transcription could not be completed.")
             lang = getattr(transcript, "language_code", "en")
-            logger.info(f"[TRANSCRIPT] fetch success | video_id={video_id}")
+            logger.info(f"[CAPTIONS_FOUND] JobID={req_id[:8]} | VideoID={video_id} | Language={lang}")
             return text, lang
         except Exception as e:
             elapsed_fetch = round((time.time() - t0_fetch) * 1000, 2)
             log_provider_call(req_id, video_id, "youtube_transcript_api", "fetch_chunks", 1, elapsed_fetch, 500, type(e).__name__)
-            logger.warning(f"[TRANSCRIPT] failed: Exception fetching chunks: {e}")
+            logger.warning(f"[CAPTIONS_NOT_FOUND] JobID={req_id[:8]} | VideoID={video_id} | Code=FETCH_CHUNKS_FAILED | Message={e}")
             raise TranscriptError("TRANSCRIPT_UNAVAILABLE", f"No transcript was available: {e}")
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
@@ -192,7 +223,7 @@ def fetch_transcript(video_id: str, request_id: str = None, timeout_seconds: int
         try:
             return future.result(timeout=timeout_seconds)
         except concurrent.futures.TimeoutError:
-            logger.warning(f"[TRANSCRIPT] failed: Caption fetch timed out after {timeout_seconds}s for video {video_id}")
+            logger.warning(f"[CAPTIONS_NOT_FOUND] JobID={(request_id or 'unknown')[:8]} | VideoID={video_id} | Code=TRANSCRIPT_FETCH_TIMEOUT")
             raise TranscriptError("TRANSCRIPT_FETCH_TIMEOUT", "Retrieving captions timed out. Processing audio fallback.")
 
 
@@ -201,23 +232,23 @@ def get_transcript(video_id: str, request_id: str = None, on_audio_fallback=None
     Guarantees automatic continuation to audio extraction and Whisper STT fallback
     whenever captions are unavailable on accessible videos."""
     req_id = request_id or str(uuid.uuid4())
-    logger.info(f"[TRANSCRIPT] fetch started | ReqID={req_id[:8]} | video={video_id}")
+    logger.info(f"[TRANSCRIPT_LOOKUP_STARTED] JobID={req_id[:8]} | VideoID={video_id}")
     try:
         raw_text, lang = fetch_transcript(video_id, req_id)
         cleaned = clean_transcript(raw_text)
         if cleaned:
-            logger.info(f"[TRANSCRIPT] fetch success | ReqID={req_id[:8]} | video={video_id}")
+            logger.info(f"[CAPTIONS_FOUND] JobID={req_id[:8]} | VideoID={video_id} | Language={lang}")
             if callable(on_progress):
                 on_progress(85, "Transcript completed")
             return cleaned, lang, "captions"
     except TranscriptError as e:
-        logger.warning(f"[TRANSCRIPT] failed: {e.code} - {e.message}")
+        logger.warning(f"[CAPTIONS_NOT_FOUND] JobID={req_id[:8]} | VideoID={video_id} | Code={e.code} | Message={e.message}")
         if e.code in ["VIDEO_PRIVATE", "INVALID_URL", "VIDEO_UNAVAILABLE", "VIDEO_AGE_RESTRICTED"]:
             raise
         if not WHISPER_FALLBACK_ENABLED:
             raise
     except Exception as e:
-        logger.exception(f"[TRANSCRIPT] failed: {type(e).__name__}: {e}")
+        logger.exception(f"[CAPTIONS_NOT_FOUND] JobID={req_id[:8]} | VideoID={video_id} | Code=UNEXPECTED_ERROR | Message={e}")
         if not WHISPER_FALLBACK_ENABLED:
             raise TranscriptError("TRANSCRIPT_UNAVAILABLE", "No transcript was available, and audio transcription could not be completed.")
 
@@ -238,7 +269,7 @@ def get_transcript(video_id: str, request_id: str = None, on_audio_fallback=None
                 pass
         raw_text, lang = transcribe_with_whisper(video_id, request_id=req_id, job_id=req_id, on_progress=on_progress)
         cleaned_text = clean_transcript(raw_text)
-        logger.info(f"[WHISPER] transcription success | ReqID={req_id[:8]} | video={video_id}")
+        logger.info(f"[WHISPER_TRANSCRIPTION_COMPLETED] JobID={req_id[:8]} | VideoID={video_id}")
         return cleaned_text, lang, "whisper"
     except WhisperError as e:
         logger.warning(f"[FALLBACK_FAILED] ReqID={req_id[:8]} | video={video_id} | WhisperError: {e.code} - {e.message}")

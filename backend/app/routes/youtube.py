@@ -168,7 +168,7 @@ def run_async_video_processing(app, job_id: str, url: str, video_id: str, user_i
             update_job_stage(job_id, JobStage.VALIDATING_TEXT, progress_override=88, message_override="Checking spelling and grammar...")
 
             # Stage: Content & Important Information Generation
-            logger.info(f"[IMPORTANT_CONTENT] Started | JobID={job_id}")
+            logger.info(f"[ARTICLE_GENERATION_STARTED] JobID={job_id} | VideoID={video_id}")
             update_job_stage(job_id, JobStage.GENERATING_IMPORTANT_CONTENT, progress_override=92, message_override="Preparing IMPORTANT CONTENT...")
             t_gen_start = time.time()
             ranked_text = rank_important_sentences(cleaned)
@@ -177,7 +177,7 @@ def run_async_video_processing(app, job_id: str, url: str, video_id: str, user_i
             article_text = article_to_plain_text(article_json)
             t_gen_end = time.time()
             _log_stage_hashes("IMPORTANT_CONTENT", article_text)
-            logger.info(f"[IMPORTANT_CONTENT] Completed | JobID={job_id} | Duration={round(t_gen_end - t_gen_start, 2)}s")
+            logger.info(f"[ARTICLE_GENERATION_COMPLETED] JobID={job_id} | VideoID={video_id} | Duration={round((t_gen_end - t_gen_start) * 1000, 2)}ms")
 
             # Stage: DB Persistence
             logger.info(f"[DATABASE] Save started | JobID={job_id}")
@@ -259,6 +259,15 @@ def run_async_video_processing(app, job_id: str, url: str, video_id: str, user_i
                     except Exception:
                         db.session.rollback()
                 set_job_error(job_id, "INTERNAL_PROCESSING_ERROR", f"Processing failed: {err_str}", retryable=True)
+
+        finally:
+            # Guarantee no job is left permanently in "processing" state
+            try:
+                state = get_job_state(job_id)
+                if state and state.get("status") == "processing":
+                    set_job_error(job_id, "UNEXPECTED_JOB_HALT", "Video processing halted unexpectedly.", retryable=True)
+            except Exception as final_err:
+                logger.debug(f"[JOB_FINALLY_GUARD_NOTE] JobID={job_id} guard check note: {final_err}")
 
 
 from app.services.job_manager import (
