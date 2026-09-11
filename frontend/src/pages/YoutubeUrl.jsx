@@ -85,6 +85,28 @@ export default function YoutubeUrl() {
     }, 1500)
   }
 
+  async function fetchClientCaptions(urlStr) {
+    try {
+      const videoId = extractVideoId(urlStr)
+      if (!videoId) return null
+      const res = await fetch(`https://www.youtube.com/api/timedtext?v=${videoId}&lang=en`, { signal: AbortSignal.timeout(3000) }).catch(() => null)
+      if (res && res.ok) {
+        const xml = await res.text().catch(() => '')
+        if (xml && xml.includes('<text')) {
+          const matches = [...xml.matchAll(/<text[^>]*>(.*?)<\/text>/gs)]
+          const text = matches
+            .map(m => m[1].replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").trim())
+            .filter(Boolean)
+            .join(' ')
+          if (text && text.length > 10) {
+            return text
+          }
+        }
+      }
+    } catch (e) {}
+    return null
+  }
+
   async function handleSubmit(e) {
     if (e && e.preventDefault) e.preventDefault()
     if (loading) return
@@ -101,9 +123,7 @@ export default function YoutubeUrl() {
     setLoading(true)
     startTimer()
 
-    // Invalidate any previous job immediately so a late in-flight response
-    // from an old submission can never overwrite the new one (see identity
-    // guard in startPolling above).
+    // Invalidate any previous job immediately
     if (pollingRef.current) {
       clearInterval(pollingRef.current)
       pollingRef.current = null
@@ -112,8 +132,11 @@ export default function YoutubeUrl() {
     setCurrentJob(null)
 
     try {
+      // Client-assisted caption extraction
+      const clientTranscript = await fetchClientCaptions(trimmed)
+
       // 1. Submit async processing job
-      const res = await api.submitVideoJob(trimmed)
+      const res = await api.submitVideoJob(trimmed, clientTranscript)
       if (res && res.job_id) {
         activeJobIdRef.current = res.job_id
         setCurrentJob({ job_id: res.job_id, status: 'queued', progress: 5 })

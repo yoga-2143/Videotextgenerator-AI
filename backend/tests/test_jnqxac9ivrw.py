@@ -13,3 +13,21 @@ def test_jnqxac9ivrw_first_youtube_video_captions_success():
     assert source == "captions"
     assert lang_code == "en"
     assert len(cleaned) > 20
+
+
+def test_bot_protection_blocked_error_prevents_audio_fallback():
+    """Verify that when YouTube bot protection is detected, get_transcript raises BOT_PROTECTION_BLOCKED and skips audio fallback."""
+    from unittest.mock import patch
+    from app.services.transcript_service import TranscriptError
+    whisper_called = []
+
+    def on_whisper():
+        whisper_called.append(True)
+
+    with patch("app.services.transcript_service.fetch_transcript") as mock_fetch:
+        mock_fetch.side_effect = TranscriptError("BOT_PROTECTION_BLOCKED", "YouTube anti-bot verification active.")
+        with pytest.raises(TranscriptError) as exc_info:
+            get_transcript("jNQXAC9IVRw", on_whisper_transcribe=on_whisper)
+
+        assert exc_info.value.code == "BOT_PROTECTION_BLOCKED"
+        assert len(whisper_called) == 0

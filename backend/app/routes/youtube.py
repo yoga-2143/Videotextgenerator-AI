@@ -32,7 +32,7 @@ IN_FLIGHT_EVENTS = {}
 IN_FLIGHT_LOCK = threading.Lock()
 
 
-def run_async_video_processing(app, job_id: str, url: str, video_id: str, user_id=None, force_reprocess: bool = False):
+def run_async_video_processing(app, job_id: str, url: str, video_id: str, user_id=None, force_reprocess: bool = False, provided_transcript: str = None):
     """Background worker function executed asynchronously by job manager thread pool."""
     t_start = time.time()
     logger.info(f"[PROCESS] Request started | JobID={job_id} | VideoID={video_id} | URL={url}")
@@ -85,33 +85,40 @@ def run_async_video_processing(app, job_id: str, url: str, video_id: str, user_i
             update_job_stage(job_id, JobStage.FETCHING_TRANSCRIPT, progress_override=20, message_override="Checking transcript...")
             t_trans_start = time.time()
 
-            # Helper callbacks passed to transcript service
-            def on_audio_fallback():
-                update_job_stage(job_id, JobStage.TRANSCRIPT_NOT_AVAILABLE, progress_override=25, message_override="Transcript unavailable. Preparing audio fallback...")
-                update_job_stage(job_id, JobStage.DOWNLOADING_AUDIO, progress_override=30, message_override="Downloading audio...")
+            if provided_transcript and provided_transcript.strip():
+                cleaned = clean_transcript(provided_transcript)
+                lang = "en"
+                source = "captions"
+                update_job_stage(job_id, JobStage.TRANSCRIPT_FOUND, progress_override=30, message_override="Transcript received. Preparing text...")
+                logger.info(f"[TRANSCRIPT_STAGE_SUCCESS] JobID={job_id} | Source=captions (client_provided) | Len={len(cleaned)}")
+            else:
+                # Helper callbacks passed to transcript service
+                def on_audio_fallback():
+                    update_job_stage(job_id, JobStage.TRANSCRIPT_NOT_AVAILABLE, progress_override=25, message_override="Transcript unavailable. Preparing audio fallback...")
+                    update_job_stage(job_id, JobStage.DOWNLOADING_AUDIO, progress_override=30, message_override="Downloading audio...")
 
-            def on_whisper_transcribing():
-                update_job_stage(job_id, JobStage.LOADING_WHISPER, progress_override=45, message_override="Loading Whisper AI speech-to-text model...")
+                def on_whisper_transcribing():
+                    update_job_stage(job_id, JobStage.LOADING_WHISPER, progress_override=45, message_override="Loading Whisper AI speech-to-text model...")
 
-            def on_progress(stage_arg, p=None, msg=None):
-                if isinstance(stage_arg, int):
-                    p, msg = stage_arg, p
-                    stage_name = JobStage.TRANSCRIBING
-                else:
-                    stage_name = stage_arg
-                update_job_stage(job_id, stage_name or JobStage.TRANSCRIBING, progress_override=p, message_override=msg)
+                def on_progress(stage_arg, p=None, msg=None):
+                    if isinstance(stage_arg, int):
+                        p, msg = stage_arg, p
+                        stage_name = JobStage.TRANSCRIBING
+                    else:
+                        stage_name = stage_arg
+                    update_job_stage(job_id, stage_name or JobStage.TRANSCRIBING, progress_override=p, message_override=msg)
 
-            cleaned, lang, source = get_transcript(
-                video_id,
-                request_id=job_id,
-                on_audio_fallback=on_audio_fallback,
-                on_whisper_transcribe=on_whisper_transcribing,
-                on_progress=on_progress
-            )
-            t_trans_end = time.time()
-            if source == "captions":
-                update_job_stage(job_id, JobStage.TRANSCRIPT_FOUND, progress_override=30, message_override="Transcript found. Preparing text...")
-            logger.info(f"[TRANSCRIPT_STAGE_SUCCESS] JobID={job_id} | Source={source} | Duration={round(t_trans_end - t_trans_start, 2)}s")
+                cleaned, lang, source = get_transcript(
+                    video_id,
+                    request_id=job_id,
+                    on_audio_fallback=on_audio_fallback,
+                    on_whisper_transcribe=on_whisper_transcribing,
+                    on_progress=on_progress
+                )
+                t_trans_end = time.time()
+                if source == "captions":
+                    update_job_stage(job_id, JobStage.TRANSCRIPT_FOUND, progress_override=30, message_override="Transcript found. Preparing text...")
+                logger.info(f"[TRANSCRIPT_STAGE_SUCCESS] JobID={job_id} | Source={source} | Duration={round(t_trans_end - t_trans_start, 2)}s")
 
             # Enrich Metadata
             video.thumbnail_url = f"https://img.youtube.com/vi/{video_id}/hqdefault.jpg"
@@ -289,6 +296,7 @@ from flask import current_app
 def submit_process_job():
     payload = request.get_json(silent=True) or {}
     url = payload.get("url") or payload.get("youtube_url") or ""
+    provided_transcript = payload.get("transcript") or payload.get("raw_text") or None
 
     try:
         video_id = extract_video_id(url)
@@ -303,7 +311,10 @@ def submit_process_job():
     app = current_app._get_current_object()
 
     # Launch background worker task
-    submit_video_processing_task(run_async_video_processing, app, job_id, url, video_id, user_id)
+    if provided_transcript:
+        submit_video_processing_task(run_async_video_processing, app, job_id, url, video_id, user_id, False, provided_transcript)
+    else:
+        submit_video_processing_task(run_async_video_processing, app, job_id, url, video_id, user_id)
 
     return jsonify({
         "success": True,
@@ -347,6 +358,7 @@ def process_video():
     """
     payload = request.get_json(silent=True) or {}
     url = payload.get("url") or payload.get("youtube_url") or ""
+    provided_transcript = payload.get("transcript") or payload.get("raw_text") or None
 
     try:
         video_id = extract_video_id(url)
@@ -380,7 +392,10 @@ def process_video():
     job_id = create_video_job(url, video_id)
     app = current_app._get_current_object()
 
-    submit_video_processing_task(run_async_video_processing, app, job_id, url, video_id, user_id)
+    if provided_transcript:
+        submit_video_processing_task(run_async_video_processing, app, job_id, url, video_id, user_id, False, provided_transcript)
+    else:
+        submit_video_processing_task(run_async_video_processing, app, job_id, url, video_id, user_id)
 
     # Synchronous wait up to 20s
     start_wait = time.time()

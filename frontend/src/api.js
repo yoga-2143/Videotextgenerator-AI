@@ -71,11 +71,11 @@ function deduplicateRequest(key, fetcher) {
 }
 
 export const api = {
-  submitVideoJob: (url) => {
+  submitVideoJob: (url, transcript) => {
     return fetch(`${BASE}/jobs/process`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...authHeaders() },
-      body: JSON.stringify({ url }),
+      body: JSON.stringify({ url, transcript }),
     }).then(handle)
   },
 
@@ -90,13 +90,13 @@ export const api = {
     }).then(handle)
   },
 
-  processVideo: (url) => {
+  processVideo: (url, transcript) => {
     const videoId = extractVideoId(url)
     return deduplicateRequest(`process:${videoId}`, () =>
       fetch(`${BASE}/videos/process`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...authHeaders() },
-        body: JSON.stringify({ url }),
+        body: JSON.stringify({ url, transcript }),
       }).then(handle)
     )
   },

@@ -184,12 +184,12 @@ def fetch_transcript(video_id: str, request_id: str = None, timeout_seconds: int
             if "private video" in err_str or "this video is private" in err_str:
                 log_provider_call(req_id, video_id, "youtube_transcript_api", "list_transcripts", attempt, elapsed, 403, "VIDEO_PRIVATE")
                 raise TranscriptError("VIDEO_PRIVATE", "This video is private and cannot be processed.")
-            if any(kw in err_str for kw in ["confirm your age", "age-gated", "sign in to confirm your age"]):
-                log_provider_call(req_id, video_id, "youtube_transcript_api", "list_transcripts", attempt, elapsed, 403, "VIDEO_AGE_RESTRICTED")
-                raise TranscriptError("VIDEO_AGE_RESTRICTED", "This video has access restrictions.")
+            if any(kw in err_str for kw in ["confirm your age", "age-gated", "sign in to confirm your age", "confirm you're not a bot"]):
+                log_provider_call(req_id, video_id, "youtube_transcript_api", "list_transcripts", attempt, elapsed, 403, "BOT_PROTECTION_BLOCKED")
+                raise TranscriptError("BOT_PROTECTION_BLOCKED", "YouTube anti-bot verification is active for this video on cloud server. Please try again or paste transcript text.")
             if any(kw in err_str for kw in ["requestblocked", "429", "too many requests", "bot", "captcha", "ip has been blocked"]):
-                log_provider_call(req_id, video_id, "youtube_transcript_api", "list_transcripts", attempt, elapsed, 429, "PROVIDER_RATE_LIMIT")
-                raise TranscriptError("PROVIDER_RATE_LIMIT", "YouTube automated request rate limit reached. Please try again in a few moments.")
+                log_provider_call(req_id, video_id, "youtube_transcript_api", "list_transcripts", attempt, elapsed, 429, "BOT_PROTECTION_BLOCKED")
+                raise TranscriptError("BOT_PROTECTION_BLOCKED", "YouTube anti-bot verification is active for this video on cloud server. Please try again or paste transcript text.")
             if any(kw in err_str for kw in ["unavailable", "404", "does not exist", "not found"]):
                 log_provider_call(req_id, video_id, "youtube_transcript_api", "list_transcripts", attempt, elapsed, 404, "VIDEO_UNAVAILABLE")
                 raise TranscriptError("VIDEO_UNAVAILABLE", "This YouTube video is unavailable, deleted, or does not exist.")
@@ -265,8 +265,11 @@ def fetch_transcript(video_id: str, request_id: str = None, timeout_seconds: int
                     return text, lang
             except Exception as e:
                 elapsed_fetch = round((time.time() - t0_fetch) * 1000, 2)
+                err_str = str(e).lower()
                 log_provider_call(req_id, video_id, "youtube_transcript_api", "fetch_chunks", 1, elapsed_fetch, 500, type(e).__name__)
                 logger.warning(f"[CAPTIONS_NOT_FOUND] JobID={req_id[:8]} | VideoID={video_id} | Code=FETCH_CHUNKS_FAILED | Message={e}")
+                if any(kw in err_str for kw in ["confirm your age", "age-gated", "sign in to confirm", "bot", "429", "requestblocked"]):
+                    raise TranscriptError("BOT_PROTECTION_BLOCKED", "YouTube anti-bot verification is active for this video on cloud server. Please try again or paste transcript text.")
 
         # Pass 3: Direct InnerTube HTML caption parsing fallback
         html_text, html_lang = fetch_direct_innertube_captions(video_id, session=session)
@@ -302,7 +305,7 @@ def get_transcript(video_id: str, request_id: str = None, on_audio_fallback=None
             return cleaned, lang, "captions"
     except TranscriptError as e:
         logger.warning(f"[CAPTIONS_NOT_FOUND] JobID={req_id[:8]} | VideoID={video_id} | Code={e.code} | Message={e.message}")
-        if e.code in ["VIDEO_PRIVATE", "INVALID_URL", "VIDEO_UNAVAILABLE", "VIDEO_AGE_RESTRICTED"]:
+        if e.code in ["VIDEO_PRIVATE", "INVALID_URL", "VIDEO_UNAVAILABLE", "VIDEO_AGE_RESTRICTED", "BOT_PROTECTION_BLOCKED", "PROVIDER_RATE_LIMIT"]:
             raise
         if not WHISPER_FALLBACK_ENABLED:
             raise
