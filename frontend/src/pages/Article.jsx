@@ -484,7 +484,7 @@ export default function Article() {
   }
 
   return (
-    <main className="mx-auto max-w-3xl px-6 pb-24 pt-10">
+    <main className="mx-auto max-w-3xl px-4 sm:px-6 pb-24 pt-6 sm:pt-10">
       {/* Article Controls Toolbar */}
       <div className="mb-8 flex flex-wrap items-center justify-between gap-4 border-b border-line pb-5">
         {/* Language Selector */}

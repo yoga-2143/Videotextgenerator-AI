@@ -17,6 +17,7 @@ body {
   font-family: 'Inter', sans-serif;
   color: #EDEFF3;
   line-height: 1.6;
+  overflow-x: hidden;
 }
 
 ::selection { background: #FF5A36; color: #0E1116; }

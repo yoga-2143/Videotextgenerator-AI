@@ -1,26 +1,31 @@
-import React from 'react'
+import React, { useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import logo from '../assets/logo.jpg'
 
 export default function Nav() {
   const location = useLocation()
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const isActive = (path) => location.pathname === path
 
   return (
-    <header className="sticky top-0 z-20 border-b border-line bg-ink/95 backdrop-blur">
-      <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-3.5">
+    <header className="sticky top-0 z-30 border-b border-line bg-ink/95 backdrop-blur">
+      <div className="mx-auto flex max-w-6xl items-center justify-between px-3.5 sm:px-6 py-3">
         {/* Brand Link with Logo */}
-        <Link to="/" className="flex items-center gap-3 group font-display text-xl font-bold tracking-tight text-paper hover:text-wave transition-colors">
+        <Link
+          to="/"
+          onClick={() => setMobileMenuOpen(false)}
+          className="flex items-center gap-2 sm:gap-3 group font-display text-sm sm:text-xl font-bold tracking-tight text-paper hover:text-wave transition-colors min-w-0 mr-2"
+        >
           <img
             src={logo}
             alt="Logo"
-            className="h-10 w-auto object-contain rounded-xl transition-transform group-hover:scale-105 shadow-md border border-line/40 bg-white"
+            className="h-8 w-auto sm:h-10 object-contain rounded-xl transition-transform group-hover:scale-105 shadow-md border border-line/40 bg-white shrink-0"
           />
-          <span>VideoTextGenerator AI</span>
+          <span className="truncate text-sm sm:text-xl font-bold">VideoTextGenerator AI</span>
         </Link>
 
-        {/* Navigation items: ONLY Home, YouTube URL, History */}
-        <nav className="flex items-center gap-7 text-base font-semibold">
+        {/* Desktop Navigation items (hidden on mobile <md, visible on md+) */}
+        <nav className="hidden md:flex items-center gap-6 lg:gap-7 text-sm lg:text-base font-semibold shrink-0">
           <Link to="/" className={`transition-colors ${isActive('/') ? 'text-wave' : 'text-mute hover:text-paper'}`}>
             Home
           </Link>
@@ -31,7 +36,55 @@ export default function Nav() {
             History
           </Link>
         </nav>
+
+        {/* Mobile Hamburger Toggle Button (visible on mobile <md) */}
+        <button
+          type="button"
+          onClick={() => setMobileMenuOpen(prev => !prev)}
+          className="md:hidden flex items-center justify-center p-2 text-paper hover:text-wave focus:outline-none cursor-pointer rounded-lg border border-line/50 bg-panel/50 shrink-0"
+          aria-label="Toggle navigation menu"
+        >
+          {mobileMenuOpen ? (
+            <svg className="w-5 h-5 sm:w-6 sm:h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          ) : (
+            <svg className="w-5 h-5 sm:w-6 sm:h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6h16M4 12h16M4 18h16" />
+            </svg>
+          )}
+        </button>
       </div>
+
+      {/* Mobile Dropdown Menu (visible when mobileMenuOpen is true on mobile <md) */}
+      {mobileMenuOpen && (
+        <div className="md:hidden border-t border-line/60 bg-panel/95 px-5 py-4 backdrop-blur shadow-xl">
+          <nav className="flex flex-col gap-3 font-semibold text-base">
+            <Link
+              to="/"
+              onClick={() => setMobileMenuOpen(false)}
+              className={`py-2 transition-colors border-b border-line/30 ${isActive('/') ? 'text-wave font-bold' : 'text-paper hover:text-wave'}`}
+            >
+              Home
+            </Link>
+            <Link
+              to="/youtube-url"
+              onClick={() => setMobileMenuOpen(false)}
+              className={`py-2 transition-colors border-b border-line/30 ${isActive('/youtube-url') ? 'text-wave font-bold' : 'text-paper hover:text-wave'}`}
+            >
+              YouTube URL
+            </Link>
+            <Link
+              to="/history"
+              onClick={() => setMobileMenuOpen(false)}
+              className={`py-2 transition-colors ${isActive('/history') ? 'text-wave font-bold' : 'text-paper hover:text-wave'}`}
+            >
+              History
+            </Link>
+          </nav>
+        </div>
+      )}
     </header>
   )
 }
+
