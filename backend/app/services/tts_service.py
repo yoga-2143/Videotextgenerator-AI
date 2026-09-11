@@ -151,29 +151,29 @@ def generate_audio(text: str, lang: str) -> str:
         if not cleaned_chunks:
             cleaned_chunks = ["Important Content Overview."]
 
-        # Synthesis dispatcher helper with automatic fallback chain
         def _render_chunk(chunk_str: str, target_file: str):
             rendered = False
-            if engine == "edge_tts":
+            if engine == "edge_tts" and voice_code:
                 try:
                     _synthesize_edge_tts(chunk_str, voice_code, target_file)
                     rendered = True
                 except Exception as ex:
-                    logger.warning(f"[TTS FALLBACK] edge_tts failed for {lang} ({voice_code}), falling back to google_web_tts: {ex}")
-            
+                    logger.warning(f"[TTS FALLBACK] edge_tts failed for {lang} ({voice_code}): {ex}")
+
             if not rendered and engine == "mms_tts":
                 try:
                     _synthesize_mms_tts(chunk_str, voice_code, target_file)
                     rendered = True
                 except Exception as ex:
-                    logger.warning(f"[TTS FALLBACK] mms_tts failed for {lang} ({voice_code}), falling back to google_web_tts: {ex}")
+                    logger.warning(f"[TTS FALLBACK] mms_tts failed for {lang} ({voice_code}): {ex}")
 
-            if not rendered and (engine == "google_web_tts" or not rendered):
+            if not rendered and engine == "google_web_tts":
                 try:
-                    _synthesize_google_web_tts(chunk_str, lang, target_file)
-                    rendered = True
+                    if len(chunk_str) <= 200:
+                        _synthesize_google_web_tts(chunk_str, lang, target_file)
+                        rendered = True
                 except Exception as ex:
-                    logger.warning(f"[TTS FALLBACK] google_web_tts failed for {lang}, falling back to gTTS: {ex}")
+                    logger.warning(f"[TTS FALLBACK] google_web_tts failed for {lang}: {ex}")
 
             if not rendered:
                 try:
@@ -181,9 +181,14 @@ def generate_audio(text: str, lang: str) -> str:
                     tts.save(target_file)
                     rendered = True
                 except Exception as ex:
-                    # Final attempt with google_web_tts using raw lang code
-                    _synthesize_google_web_tts(chunk_str, lang, target_file)
+                    logger.warning(f"[TTS FALLBACK] gTTS failed for {lang} ({tts_locale}): {ex}")
+
+            if not rendered:
+                try:
+                    _synthesize_edge_tts(chunk_str, "en-US-AvaMultilingualNeural", target_file)
                     rendered = True
+                except Exception as ex:
+                    raise TTSError(f"Voice generation failed for language '{lang}': {ex}")
 
         if len(cleaned_chunks) == 1:
             _render_chunk(cleaned_chunks[0], filepath)
