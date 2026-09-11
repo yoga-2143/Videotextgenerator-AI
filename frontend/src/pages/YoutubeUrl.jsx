@@ -66,7 +66,7 @@ export default function YoutubeUrl() {
           setLoading(false)
 
           const data = jobState.result
-          const targetId = data?.article?.id || data?.video_id || data?.id
+          const targetId = data?.article?.id || data?.video_id
           if (targetId) {
             navigate(`/article/${targetId}`, { state: { video: data } })
           } else {

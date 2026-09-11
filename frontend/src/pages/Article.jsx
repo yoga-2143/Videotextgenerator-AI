@@ -120,51 +120,35 @@ export default function Article() {
     setNotFound(false)
     redirectingRef.current = false
 
-    fetch(`/api/articles/${id}`)
-      .then(r => {
-        if (r.status === 404) {
-          setNotFound(true)
-          return null
-        }
-        if (!r.ok) {
-          throw new Error(`Server error (${r.status}). Unable to fetch article.`)
-        }
-        return r.json()
-      })
-      .then(res => {
-        if (res && res.success && res.data) {
-          setArticle(res.data)
-          if (res.data.language) {
-            setSelectedLang(res.data.language)
-            audioLangRef.current = res.data.language
-          }
-        } else if (res && !res.success) {
-          if (res.error?.code === 'NOT_FOUND') {
-            setNotFound(true)
-          } else {
-            setError(res.error?.message || 'Failed to load article details.')
+    api.getArticle(id)
+      .then(data => {
+        if (data) {
+          setArticle(data)
+          if (data.language) {
+            setSelectedLang(data.language)
+            audioLangRef.current = data.language
           }
         } else {
           setNotFound(true)
+          setError('Article data was empty.')
         }
       })
       .catch(err => {
-        setError(err.message || 'Network error loading article.')
+        if (err.status === 404 || err.code === 'NOT_FOUND') {
+          setNotFound(true)
+          setError(err.message || `Article #${id} was not found on the backend server.`)
+        } else {
+          setError(err.message || 'Network error loading article from server.')
+        }
       })
       .finally(() => setLoading(false))
 
     api.getLanguages().then(setLanguages).catch(() => {})
   }, [id])
 
-  // Safe Single-Execution Redirect for Missing Articles to Main Video Processor (/youtube-url)
+  // Missing article state: keep user informed without silent auto-redirects
   useEffect(() => {
-    if (notFound && !loading && !redirectingRef.current) {
-      redirectingRef.current = true
-      const timer = setTimeout(() => {
-        navigate('/youtube-url', { replace: true })
-      }, 1500)
-      return () => clearTimeout(timer)
-    }
+    // Auto-redirect removed per Requirement #10 so real API error is displayed on screen
   }, [notFound, loading, navigate])
 
   async function handleLanguageChange(langCode) {
@@ -394,24 +378,32 @@ export default function Article() {
   if (notFound) {
     return (
       <main className="mx-auto max-w-3xl px-6 py-16 text-center">
-        <div className="rounded-3xl border border-signal/30 bg-panel p-8 shadow-2xl">
-          <div className="inline-flex items-center gap-3 rounded-full border border-signal/30 bg-signal/10 px-5 py-2.5 text-signal font-mono text-sm mb-6">
-            <span className="relative flex h-2.5 w-2.5">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-signal opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-signal"></span>
-            </span>
-            Article not found. Redirecting to Main Video Processor...
+        <div className="rounded-3xl border border-rose-500/30 bg-panel p-8 shadow-2xl">
+          <div className="flex items-center justify-center gap-2 text-rose-400 font-mono text-base font-bold uppercase mb-3">
+            <svg className="w-6 h-6 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            Article Not Found
           </div>
-          <p className="text-mute text-sm font-mono mb-6">
-            If redirection does not happen automatically, click below to open the Main Video Processor.
+          <p className="text-paper text-base mb-6 font-medium leading-relaxed max-w-lg mx-auto">
+            {error || `Article #${id} could not be found on the server.`}
           </p>
-          <button
-            type="button"
-            onClick={() => navigate('/youtube-url', { replace: true })}
-            className="inline-flex items-center gap-2 rounded-full bg-signal px-7 py-3 font-mono text-sm font-bold text-ink hover:opacity-90 transition-opacity cursor-pointer shadow-lg"
-          >
-            Go to Main Video Processor
-          </button>
+          <div className="flex flex-wrap items-center justify-center gap-4">
+            <button
+              type="button"
+              onClick={() => navigate('/youtube-url', { replace: true })}
+              className="inline-flex items-center gap-2 rounded-full bg-signal px-7 py-3 font-mono text-sm font-bold text-ink hover:opacity-90 transition-opacity cursor-pointer shadow-lg"
+            >
+              Go to Main Video Processor
+            </button>
+            <button
+              type="button"
+              onClick={() => navigate('/history')}
+              className="rounded-full border border-line px-6 py-2.5 font-mono text-sm font-semibold text-paper hover:bg-line/40 transition-colors cursor-pointer"
+            >
+              View Processing History
+            </button>
+          </div>
         </div>
       </main>
     )
@@ -434,11 +426,10 @@ export default function Article() {
               onClick={() => {
                 setError('')
                 setLoading(true)
-                fetch(`/api/articles/${id}`)
-                  .then(r => r.json())
-                  .then(res => {
-                    if (res?.success && res?.data) setArticle(res.data)
-                    else setError(res?.error?.message || 'Article not found.')
+                api.getArticle(id)
+                  .then(data => {
+                    if (data) setArticle(data)
+                    else setError('Article not found.')
                   })
                   .catch(err => setError(err.message || 'Network error.'))
                   .finally(() => setLoading(false))
