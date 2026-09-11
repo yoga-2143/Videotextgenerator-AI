@@ -187,3 +187,37 @@ def test_12_long_video_job_pipeline_flow():
     update_job_stage(job_id, JobStage.GENERATING_IMPORTANT_CONTENT, progress_override=92)
     state2 = get_job_state(job_id)
     assert state2["progress"] == 92
+
+
+def test_13_supadata_provider_primary_success_and_isolation():
+    """13. Verify SupadataTranscriptProvider is primary, returns source='supadata', and skips Whisper/yt-dlp."""
+    from app.services.transcript_providers import SupadataTranscriptProvider
+    whisper_called = []
+    
+    def on_whisper():
+        whisper_called.append(True)
+
+    with patch("os.getenv") as mock_env, patch("requests.get") as mock_get:
+        mock_env.side_effect = lambda k, d="": "test_supadata_key_123" if k == "SUPADATA_API_KEY" else d
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "lang": "en",
+            "content": [{"text": "Me at the zoo. Elephants have long trunks."}]
+        }
+        mock_get.return_value = mock_resp
+
+        provider = SupadataTranscriptProvider()
+        assert provider.is_available() is True
+        res = provider.fetch("jNQXAC9IVRw")
+        assert res is not None
+        assert res.video_id == "jNQXAC9IVRw"
+        assert res.source == "supadata"
+        assert "Elephants have long trunks" in res.transcript_text
+        assert len(res.source_text_hash) > 0
+
+        # Verify chain executes Supadata first and never calls Whisper/yt-dlp
+        chain = TranscriptProviderChain()
+        chain_res = chain.execute("jNQXAC9IVRw", on_whisper_transcribe=on_whisper)
+        assert chain_res.source == "supadata"
+        assert len(whisper_called) == 0

@@ -273,11 +273,70 @@ class WhisperProvider(TranscriptProvider):
         return None
 
 
+class SupadataTranscriptProvider(TranscriptProvider):
+    """Primary cloud-safe transcript provider that uses the Supadata YouTube transcript API."""
+    name: str = "supadata"
+
+    def __init__(self):
+        self.api_key = os.getenv("SUPADATA_API_KEY", "").strip()
+
+    def is_available(self) -> bool:
+        return bool(self.api_key)
+
+    def fetch(self, video_id: str, request_id: Optional[str] = None) -> Optional[TranscriptResult]:
+        req_id = request_id or str(uuid.uuid4())
+        if not self.is_available():
+            logger.info(f"[PROVIDER_SKIP] Provider=supadata | Reason=NO_SUPADATA_API_KEY_CONFIGURED")
+            return None
+
+        logger.info(f"[PROVIDER_ATTEMPT] Provider=supadata | JobID={req_id[:8]} | VideoID={video_id}")
+
+        try:
+            url = f"https://api.supadata.ai/v1/youtube/transcript?videoId={video_id}"
+            headers = {"x-api-key": self.api_key, "User-Agent": "VETRI/1.0"}
+            r = requests.get(url, headers=headers, timeout=20)
+            if r.status_code == 200:
+                data = r.json()
+                chunks = []
+                lang = data.get("lang") or data.get("language") or "en"
+                content = data.get("content") or data.get("transcript") or []
+                if isinstance(content, list):
+                    for item in content:
+                        if isinstance(item, dict) and "text" in item:
+                            chunks.append(item["text"])
+                        elif isinstance(item, str):
+                            chunks.append(item)
+                elif isinstance(content, str):
+                    chunks.append(content)
+
+                raw_text = " ".join(chunks).strip()
+                if raw_text:
+                    from app.services.transcript_service import clean_transcript
+                    cleaned = clean_transcript(raw_text)
+                    res = TranscriptResult(
+                        video_id=video_id,
+                        source="supadata",
+                        source_language=lang,
+                        transcript_text=cleaned,
+                        confidence=0.98,
+                    )
+                    if validate_transcript(res, video_id):
+                        logger.info(f"[PROVIDER_SUCCESS] Provider=supadata | JobID={req_id[:8]} | VideoID={video_id} | Hash={res.source_text_hash[:16]}")
+                        return res
+            else:
+                logger.warning(f"[PROVIDER_FAILED] Provider=supadata | JobID={req_id[:8]} | Status={r.status_code} | Text={r.text[:200]}")
+        except Exception as e:
+            logger.warning(f"[PROVIDER_FAILED] Provider=supadata | JobID={req_id[:8]} | Error={e}")
+
+        return None
+
+
 class TranscriptProviderChain:
     """Executes configured transcript providers in sequence with structured logging and bot protection guards."""
 
     def __init__(self, providers: Optional[List[TranscriptProvider]] = None):
         self.providers = providers or [
+            SupadataTranscriptProvider(),
             YouTubeCaptionProvider(),
             AlternativeTranscriptProvider(),
         ]
