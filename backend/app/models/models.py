@@ -76,6 +76,7 @@ class Article(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     audio = db.relationship("Audio", backref="article", cascade="all, delete-orphan", lazy=True)
+    translations = db.relationship("TranslationCache", backref="article", cascade="all, delete-orphan", lazy=True)
 
     __table_args__ = (db.UniqueConstraint("video_id", "language", name="uq_video_language"),)
 

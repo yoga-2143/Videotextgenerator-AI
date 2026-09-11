@@ -1,7 +1,7 @@
 import os
 from flask import Blueprint, jsonify
 from app import db
-from app.models.models import Video, Audio
+from app.models.models import Video, Article, Audio, TranslationCache
 
 history_bp = Blueprint("history", __name__)
 
@@ -34,16 +34,26 @@ def delete_history_item(video_id):
         }), 404
 
     try:
-        # Clean up generated audio files on disk if they exist
-        for article in video.articles:
-            for audio in article.audio:
+        articles = Article.query.filter_by(video_id=video.id).all()
+        article_ids = [a.id for a in articles]
+
+        if article_ids:
+            # 1. Clean up generated audio files on disk for deleted articles
+            audio_records = Audio.query.filter(Audio.article_id.in_(article_ids)).all()
+            for audio in audio_records:
                 if audio.file_path and os.path.exists(audio.file_path):
                     try:
                         os.remove(audio.file_path)
                     except OSError:
                         pass
 
-        # Transactional deletion of video and cascading relationships
+            # 2. Delete dependent TranslationCache rows referencing deleted articles
+            TranslationCache.query.filter(TranslationCache.article_id.in_(article_ids)).delete(synchronize_session=False)
+
+            # 3. Delete dependent Audio rows referencing deleted articles
+            Audio.query.filter(Audio.article_id.in_(article_ids)).delete(synchronize_session=False)
+
+        # 4. Transactional deletion of video and cascading relationships
         db.session.delete(video)
         db.session.commit()
         return jsonify({
@@ -63,14 +73,26 @@ def delete_history_item(video_id):
 def clear_all_history():
     videos = Video.query.all()
     try:
+        all_articles = Article.query.all()
+        article_ids = [a.id for a in all_articles]
+
+        if article_ids:
+            # 1. Clean up generated audio files on disk
+            audio_records = Audio.query.all()
+            for audio in audio_records:
+                if audio.file_path and os.path.exists(audio.file_path):
+                    try:
+                        os.remove(audio.file_path)
+                    except OSError:
+                        pass
+
+            # 2. Delete all TranslationCache rows
+            TranslationCache.query.delete(synchronize_session=False)
+
+            # 3. Delete all Audio rows
+            Audio.query.delete(synchronize_session=False)
+
         for video in videos:
-            for article in video.articles:
-                for audio in article.audio:
-                    if audio.file_path and os.path.exists(audio.file_path):
-                        try:
-                            os.remove(audio.file_path)
-                        except OSError:
-                            pass
             db.session.delete(video)
         db.session.commit()
         return jsonify({
