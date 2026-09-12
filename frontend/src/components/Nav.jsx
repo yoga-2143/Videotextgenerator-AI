@@ -41,7 +41,7 @@ export default function Nav() {
         <button
           type="button"
           onClick={() => setMobileMenuOpen(prev => !prev)}
-          className="md:hidden flex items-center justify-center p-2 text-paper hover:text-wave focus:outline-none cursor-pointer rounded-lg border border-line/50 bg-panel/50 shrink-0"
+          className="md:hidden flex h-11 w-11 items-center justify-center text-paper hover:text-wave focus:outline-none cursor-pointer rounded-xl border border-line/50 bg-panel/50 shrink-0 min-h-[44px] min-w-[44px]"
           aria-label="Toggle navigation menu"
         >
           {mobileMenuOpen ? (
@@ -58,26 +58,26 @@ export default function Nav() {
 
       {/* Mobile Dropdown Menu (visible when mobileMenuOpen is true on mobile <md) */}
       {mobileMenuOpen && (
-        <div className="md:hidden border-t border-line/60 bg-panel/95 px-5 py-4 backdrop-blur shadow-xl">
-          <nav className="flex flex-col gap-3 font-semibold text-base">
+        <div className="md:hidden border-t border-line/60 bg-panel/95 px-5 py-3 backdrop-blur shadow-xl">
+          <nav className="flex flex-col gap-2 font-semibold text-base">
             <Link
               to="/"
               onClick={() => setMobileMenuOpen(false)}
-              className={`py-2 transition-colors border-b border-line/30 ${isActive('/') ? 'text-wave font-bold' : 'text-paper hover:text-wave'}`}
+              className={`flex items-center min-h-[44px] py-2.5 transition-colors border-b border-line/30 ${isActive('/') ? 'text-wave font-bold' : 'text-paper hover:text-wave'}`}
             >
               Home
             </Link>
             <Link
               to="/youtube-url"
               onClick={() => setMobileMenuOpen(false)}
-              className={`py-2 transition-colors border-b border-line/30 ${isActive('/youtube-url') ? 'text-wave font-bold' : 'text-paper hover:text-wave'}`}
+              className={`flex items-center min-h-[44px] py-2.5 transition-colors border-b border-line/30 ${isActive('/youtube-url') ? 'text-wave font-bold' : 'text-paper hover:text-wave'}`}
             >
               YouTube URL
             </Link>
             <Link
               to="/history"
               onClick={() => setMobileMenuOpen(false)}
-              className={`py-2 transition-colors border-b border-line/30 ${isActive('/history') ? 'text-wave font-bold' : 'text-paper hover:text-wave'}`}
+              className={`flex items-center min-h-[44px] py-2.5 transition-colors ${isActive('/history') ? 'text-wave font-bold' : 'text-paper hover:text-wave'}`}
             >
               History
             </Link>

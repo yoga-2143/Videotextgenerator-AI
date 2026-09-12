@@ -210,21 +210,21 @@ export default function YoutubeUrl() {
   }
 
   return (
-    <main className="mx-auto max-w-4xl px-6 py-16">
-      <div className="text-center mb-12">
-        <span className="font-mono text-sm sm:text-base font-bold uppercase tracking-[0.2em] text-wave">
+    <main className="mx-auto max-w-4xl px-4 sm:px-6 py-8 sm:py-16">
+      <div className="text-center mb-8 sm:mb-12">
+        <span className="font-mono text-xs sm:text-base font-bold uppercase tracking-[0.15em] sm:tracking-[0.2em] text-wave">
           YouTube Processor
         </span>
-        <h1 className="mt-3 font-display page-title font-bold text-paper">
+        <h1 className="mt-2 sm:mt-3 font-display page-title font-bold text-paper">
           Enter YouTube Video URL
         </h1>
-        <p className="mt-4 text-base sm:text-lg text-mute max-w-xl mx-auto leading-relaxed">
+        <p className="mt-3 sm:mt-4 text-sm sm:text-lg text-mute max-w-xl mx-auto leading-relaxed">
           Paste any public YouTube link to extract clean transcript data, rank important facts, and display important content immediately.
         </p>
       </div>
 
-      <form onSubmit={handleSubmit} className="rounded-3xl border border-line bg-panel p-8 shadow-2xl mb-8">
-        <label htmlFor="yt-input" className="block text-sm font-mono font-bold uppercase tracking-wider text-paper mb-3">
+      <form onSubmit={handleSubmit} className="rounded-2xl sm:rounded-3xl border border-line bg-panel p-5 sm:p-8 shadow-2xl mb-8">
+        <label htmlFor="yt-input" className="block text-xs sm:text-sm font-mono font-bold uppercase tracking-wider text-paper mb-2.5 sm:mb-3">
           YouTube Video Link
         </label>
         <input
@@ -234,18 +234,18 @@ export default function YoutubeUrl() {
           onChange={(e) => setUrl(e.target.value)}
           placeholder="https://www.youtube.com/watch?v=..."
           disabled={loading}
-          className="w-full rounded-2xl border border-line bg-ink px-5 py-4 text-lg sm:text-xl text-paper placeholder:text-mute focus:border-wave focus:outline-none mb-6 font-medium disabled:opacity-60"
+          className="w-full rounded-xl sm:rounded-2xl border border-line bg-ink px-4 sm:px-5 py-3.5 sm:py-4 text-base sm:text-xl text-paper placeholder:text-mute focus:border-wave focus:outline-none mb-5 sm:mb-6 font-medium disabled:opacity-60"
         />
 
         {/* Live Progress Stage Feedback Box */}
         {loading && (
-          <div className="mb-6 rounded-2xl border border-wave/40 bg-wave/10 p-5">
-            <div className="flex items-center justify-between gap-4 mb-2">
-              <div className="flex items-center gap-2 font-mono text-sm font-bold uppercase text-wave">
+          <div className="mb-5 sm:mb-6 rounded-2xl border border-wave/40 bg-wave/10 p-4 sm:p-5">
+            <div className="flex items-center justify-between gap-3 mb-2">
+              <div className="flex items-center gap-2 font-mono text-xs sm:text-sm font-bold uppercase text-wave min-w-0">
                 <div className="h-4 w-4 animate-spin rounded-full border-2 border-wave border-t-transparent shrink-0" />
-                <span>{jobStageMessage || 'Processing Video...'}</span>
+                <span className="truncate">{jobStageMessage || 'Processing Video...'}</span>
               </div>
-              <span className="font-mono text-sm font-bold text-wave">{jobProgress}%</span>
+              <span className="font-mono text-xs sm:text-sm font-bold text-wave shrink-0">{jobProgress}%</span>
             </div>
 
             {/* Progress Bar Container */}
@@ -256,12 +256,12 @@ export default function YoutubeUrl() {
               />
             </div>
 
-            <div className="flex items-center justify-between text-xs font-mono text-mute">
+            <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-mono text-mute">
               <span>Stage-based processing active ({elapsedSeconds}s)</span>
               <button
                 type="button"
                 onClick={handleCancel}
-                className="text-signal hover:underline font-bold cursor-pointer"
+                className="text-signal hover:underline font-bold cursor-pointer min-h-[36px] flex items-center"
               >
                 Cancel Request
               </button>
@@ -271,19 +271,19 @@ export default function YoutubeUrl() {
 
         {/* User-Friendly Error Display & Retry */}
         {error && !loading && (
-          <div className="mb-6 rounded-2xl border border-rose-500/30 bg-rose-500/10 p-5 text-paper">
-            <div className="flex items-center gap-2 mb-1.5 font-bold text-rose-400 font-mono text-sm uppercase tracking-wider">
+          <div className="mb-5 sm:mb-6 rounded-2xl border border-rose-500/30 bg-rose-500/10 p-4 sm:p-5 text-paper">
+            <div className="flex items-center gap-2 mb-1.5 font-bold text-rose-400 font-mono text-xs sm:text-sm uppercase tracking-wider">
               <svg className="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
               Processing Notice
             </div>
-            <p className="text-base leading-relaxed text-paper/90 font-medium mb-3">{error}</p>
+            <p className="text-sm sm:text-base leading-relaxed text-paper/90 font-medium mb-3">{error}</p>
             <button
               type="button"
               onClick={handleSubmit}
               disabled={loading}
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-rose-500 text-white font-bold text-sm hover:bg-rose-600 transition-colors cursor-pointer disabled:opacity-60"
+              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-rose-500 text-white font-bold text-xs sm:text-sm hover:bg-rose-600 transition-colors cursor-pointer disabled:opacity-60 min-h-[44px]"
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
@@ -296,7 +296,7 @@ export default function YoutubeUrl() {
         <button
           type="submit"
           disabled={loading}
-          className="w-full inline-flex items-center justify-center gap-3 rounded-2xl bg-signal py-4 text-base sm:text-lg font-bold text-ink transition-transform hover:scale-[1.01] active:scale-[0.99] disabled:opacity-60 shadow-lg cursor-pointer"
+          className="w-full inline-flex items-center justify-center gap-3 rounded-xl sm:rounded-2xl bg-signal py-3.5 sm:py-4 text-base sm:text-lg font-bold text-ink transition-transform hover:scale-[1.01] active:scale-[0.99] disabled:opacity-60 shadow-lg cursor-pointer min-h-[48px]"
         >
           {loading ? 'Processing Video URL...' : 'Process Video URL'}
         </button>
