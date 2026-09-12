@@ -46,6 +46,13 @@ def translate_article(article_id):
         logger.error(f"[TRANSLATION_FAILED] article_id={article_id} | reason=NOT_FOUND")
         return error_response("NOT_FOUND", "Article not found.", 404)
 
+    from app.utils.auth_utils import get_current_user_optional
+    user = get_current_user_optional()
+    user_id = user.id if user else None
+    if original.video and original.video.user_id and not original.is_published:
+        if not user_id or original.video.user_id != user_id:
+            return error_response("FORBIDDEN", "You do not have permission to access this article.", 403)
+
     source_article = Article.query.filter_by(video_id=original.video_id, is_original=True).first() or original
     current_src_hash = hashlib.sha256(f"{source_article.content}".encode("utf-8")).hexdigest()[:16]
 

@@ -173,4 +173,37 @@ export const api = {
   search: (query) => fetch(`${BASE}/search?q=${encodeURIComponent(query)}`).then(handle),
 
   health: () => fetch(`${BASE}/health`).then(handle),
+
+  // Auth Endpoints
+  googleLogin: (credential) =>
+    fetch(`${BASE}/auth/google`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ credential }),
+    }).then(handle),
+
+  emailLogin: (email, password) =>
+    fetch(`${BASE}/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password }),
+    }).then(handle),
+
+  signUp: (name, email, password) =>
+    fetch(`${BASE}/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, email, password }),
+    }).then(handle),
+
+  getMe: () =>
+    fetch(`${BASE}/me`, {
+      headers: authHeaders(),
+    }).then(handle),
+
+  logout: () =>
+    fetch(`${BASE}/logout`, {
+      method: 'POST',
+      headers: authHeaders(),
+    }).then(handle),
 }

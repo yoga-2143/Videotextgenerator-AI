@@ -2,13 +2,15 @@ import os
 from flask import Blueprint, jsonify
 from app import db
 from app.models.models import Video, Article, Audio, TranslationCache
+from app.utils.auth_utils import require_auth
 
 history_bp = Blueprint("history", __name__)
 
 
 @history_bp.route("/history", methods=["GET"])
-def get_history():
-    videos = Video.query.filter(Video.status == "done").order_by(Video.created_at.desc()).all()
+@require_auth
+def get_history(user):
+    videos = Video.query.filter(Video.user_id == user.id, Video.status == "done").order_by(Video.created_at.desc()).all()
     return jsonify({
         "success": True,
         "data": [{
@@ -25,8 +27,9 @@ def get_history():
 
 
 @history_bp.route("/history/<int:video_id>", methods=["DELETE"])
-def delete_history_item(video_id):
-    video = db.session.get(Video, video_id)
+@require_auth
+def delete_history_item(user, video_id):
+    video = Video.query.filter(Video.id == video_id, Video.user_id == user.id).first()
     if not video:
         return jsonify({
             "success": False,
@@ -70,15 +73,23 @@ def delete_history_item(video_id):
 
 @history_bp.route("/history/clear_all", methods=["DELETE"])
 @history_bp.route("/history/all", methods=["DELETE"])
-def clear_all_history():
-    videos = Video.query.all()
+@require_auth
+def clear_all_history(user):
+    videos = Video.query.filter(Video.user_id == user.id).all()
+    if not videos:
+        return jsonify({
+            "success": True,
+            "message": "No history items to clear."
+        })
+
     try:
-        all_articles = Article.query.all()
-        article_ids = [a.id for a in all_articles]
+        video_ids = [v.id for v in videos]
+        user_articles = Article.query.filter(Article.video_id.in_(video_ids)).all()
+        article_ids = [a.id for a in user_articles]
 
         if article_ids:
-            # 1. Clean up generated audio files on disk
-            audio_records = Audio.query.all()
+            # 1. Clean up generated audio files on disk for user's articles
+            audio_records = Audio.query.filter(Audio.article_id.in_(article_ids)).all()
             for audio in audio_records:
                 if audio.file_path and os.path.exists(audio.file_path):
                     try:
@@ -86,11 +97,11 @@ def clear_all_history():
                     except OSError:
                         pass
 
-            # 2. Delete all TranslationCache rows
-            TranslationCache.query.delete(synchronize_session=False)
+            # 2. Delete TranslationCache rows for user's articles
+            TranslationCache.query.filter(TranslationCache.article_id.in_(article_ids)).delete(synchronize_session=False)
 
-            # 3. Delete all Audio rows
-            Audio.query.delete(synchronize_session=False)
+            # 3. Delete Audio rows for user's articles
+            Audio.query.filter(Audio.article_id.in_(article_ids)).delete(synchronize_session=False)
 
         for video in videos:
             db.session.delete(video)
@@ -108,12 +119,13 @@ def clear_all_history():
 
 
 @history_bp.route("/articles/<int:article_id>/publish", methods=["POST"])
-def publish_article(article_id):
+@require_auth
+def publish_article(user, article_id):
     from datetime import datetime
     from app.models.models import Article
 
     article = db.session.get(Article, article_id)
-    if not article:
+    if not article or (article.video and article.video.user_id != user.id):
         return jsonify({
             "success": False,
             "error": {"code": "NOT_FOUND", "message": "Article not found."}
@@ -150,3 +162,4 @@ def get_published():
             "thumbnail_url": a.video.thumbnail_url if a.video else None,
         } for a in published]
     })
+

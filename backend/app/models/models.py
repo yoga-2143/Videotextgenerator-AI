@@ -20,6 +20,9 @@ class User(db.Model):
 
     videos = db.relationship("Video", backref="user", lazy=True)
 
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
     def set_password(self, password: str):
         self.password_hash = generate_password_hash(password)
 
@@ -51,6 +54,9 @@ class Video(db.Model):
     transcript = db.relationship("Transcript", backref="video", cascade="all, delete-orphan", uselist=False, lazy=True)
     articles = db.relationship("Article", backref="video", cascade="all, delete-orphan", lazy=True)
 
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
 
 class Transcript(db.Model):
     __tablename__ = "transcripts"
@@ -59,6 +65,9 @@ class Transcript(db.Model):
     raw_text = db.Column(LongText)
     cleaned_text = db.Column(LongText)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
 
 
 class Article(db.Model):
@@ -80,6 +89,9 @@ class Article(db.Model):
 
     __table_args__ = (db.UniqueConstraint("video_id", "language", name="uq_video_language"),)
 
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
 
 class Audio(db.Model):
     __tablename__ = "audio"
@@ -90,6 +102,9 @@ class Audio(db.Model):
     file_path = db.Column(db.String(500))
     dubbing_source = db.Column(db.String(50), default="gtts_fallback")  # seamless_m4t, gtts_fallback, none
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
 
 
 class TranslationCache(db.Model):
@@ -103,6 +118,9 @@ class TranslationCache(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     __table_args__ = (db.UniqueConstraint("article_id", "target_language", name="uq_article_target_lang"),)
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
 
 
 class ProcessingJob(db.Model):
@@ -119,5 +137,9 @@ class ProcessingJob(db.Model):
     cancelled = db.Column(db.Boolean, default=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
 
 

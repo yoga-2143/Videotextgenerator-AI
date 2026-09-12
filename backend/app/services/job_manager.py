@@ -177,6 +177,10 @@ def _sync_job_to_db(job_data: dict):
             pj.cancelled = job_data.get("cancelled", pj.cancelled)
         db.session.commit()
     except Exception as e:
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
         logger.debug(f"[JOB_DB_SYNC_NOTE] Could not sync job {job_data.get('job_id')} to DB: {e}")
 
 
@@ -207,6 +211,10 @@ def _get_job_from_db(job_id: str) -> dict:
             "cancelled": bool(pj.cancelled),
         }
     except Exception as e:
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
         logger.debug(f"[JOB_DB_READ_NOTE] Could not read job {job_id} from DB: {e}")
         return None
 
