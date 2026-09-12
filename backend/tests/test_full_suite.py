@@ -309,8 +309,13 @@ def test_cache_invalidation_on_article_text_change(client, app, monkeypatch):
 # 22. History Saves Only Valid Completed Records Test
 def test_history_saves_only_completed(client, app):
     with app.app_context():
-        v_done = Video(youtube_id="v_done_hist", youtube_url="https://youtube.com/watch?v=v_done_hist", status="done", title="Completed Video")
-        v_fail = Video(youtube_id="v_fail_hist", youtube_url="https://youtube.com/watch?v=v_fail_hist", status="failed", title="Failed Video")
+        user = User(email="test_h_comp@example.com")
+        db.session.add(user)
+        db.session.commit()
+        token = issue_token(user)
+
+        v_done = Video(youtube_id="v_done_hist", youtube_url="https://youtube.com/watch?v=v_done_hist", status="done", title="Completed Video", user_id=user.id)
+        v_fail = Video(youtube_id="v_fail_hist", youtube_url="https://youtube.com/watch?v=v_fail_hist", status="failed", title="Failed Video", user_id=user.id)
         db.session.add_all([v_done, v_fail])
         db.session.commit()
 
@@ -318,7 +323,7 @@ def test_history_saves_only_completed(client, app):
         db.session.add(art_done)
         db.session.commit()
 
-    res = client.get("/api/history")
+    res = client.get("/api/history", headers={"Authorization": f"Bearer {token}"})
     assert res.status_code == 200
     history_data = res.get_json()["data"]
     video_titles = [item.get("title") for item in history_data]

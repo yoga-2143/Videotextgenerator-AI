@@ -40,8 +40,18 @@ def test_languages_endpoint(client):
     assert "ta" in codes and "en" in codes
 
 
-def test_history_endpoint(client):
-    resp = client.get("/api/history")
+def test_history_endpoint(client, app):
+    # Unauthenticated request returns 401
+    resp_unauth = client.get("/api/history")
+    assert resp_unauth.status_code == 401
+
+    with app.app_context():
+        user = User(email="test_hist@example.com")
+        db.session.add(user)
+        db.session.commit()
+        token = issue_token(user)
+
+    resp = client.get("/api/history", headers={"Authorization": f"Bearer {token}"})
     assert resp.status_code == 200
 
 
@@ -78,19 +88,30 @@ def test_logout_endpoint(client, app):
     assert resp.get_json()["success"] is True
 
 
-def test_delete_history_item_not_found(client):
-    resp = client.delete("/api/history/9999")
+def test_delete_history_item_not_found(client, app):
+    with app.app_context():
+        user = User(email="del_nf@example.com")
+        db.session.add(user)
+        db.session.commit()
+        token = issue_token(user)
+
+    resp = client.delete("/api/history/9999", headers={"Authorization": f"Bearer {token}"})
     assert resp.status_code == 404
 
 
 def test_delete_history_item_open(client, app):
     with app.app_context():
-        video = Video(youtube_id="v_12345", youtube_url="https://youtube.com/watch?v=v_12345", title="Public Video")
+        user = User(email="del_open@example.com")
+        db.session.add(user)
+        db.session.commit()
+
+        video = Video(youtube_id="v_12345", youtube_url="https://youtube.com/watch?v=v_12345", title="Public Video", user_id=user.id)
         db.session.add(video)
         db.session.commit()
         video_id = video.id
+        token = issue_token(user)
 
-    resp = client.delete(f"/api/history/{video_id}")
+    resp = client.delete(f"/api/history/{video_id}", headers={"Authorization": f"Bearer {token}"})
     assert resp.status_code == 200
 
 
