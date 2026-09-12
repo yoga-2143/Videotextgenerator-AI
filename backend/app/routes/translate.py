@@ -192,7 +192,9 @@ def translate_article(article_id):
         logger.info(f"[TRANSLATION_VALIDATED] target_lang={target_lang} | file=translate.py | status=passed | len={len(translated_content)}")
     except TranslationError as e:
         logger.error(f"[TRANSLATION_FAILED] video_id={source_article.video_id}, target_lang={target_lang}, err={e}")
-        return error_response("TRANSLATION_FAILED", str(e), 502)
+        from app.services.error_validator import sanitize_user_error_message
+        clean_msg = sanitize_user_error_message("TRANSLATION_FAILED", str(e))
+        return error_response("TRANSLATION_FAILED", clean_msg, 502)
 
     new_article = Article(video_id=source_article.video_id, language=target_lang,
                            title=translated_title, content=translated_content, source_text_hash=current_src_hash, is_original=False)

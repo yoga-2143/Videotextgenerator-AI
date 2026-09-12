@@ -308,6 +308,8 @@ def set_job_result(job_id: str, result_data: dict):
 
 
 def set_job_error(job_id: str, error_code: str, user_message: str, retryable: bool = True):
+    from app.services.error_validator import sanitize_user_error_message
+    clean_msg = sanitize_user_error_message(error_code, user_message)
     with JOBS_LOCK:
         if job_id not in VIDEO_JOBS:
             db_job = _get_job_from_db(job_id)
@@ -322,19 +324,19 @@ def set_job_error(job_id: str, error_code: str, user_message: str, retryable: bo
             duration_ms = round((now - t_start) * 1000, 2)
             job["error"] = {
                 "code": error_code,
-                "message": user_message,
+                "message": clean_msg,
                 "retryable": retryable,
             }
             job["status"] = "failed"
             job["stage"] = JobStage.FAILED
             job["progress"] = 0
-            job["message"] = user_message
+            job["message"] = clean_msg
             job["updated_at"] = now
             _sync_job_to_db(job)
             if error_code == "DATABASE_TEARDOWN":
-                logger.debug(f"[JOB_FAILED] JobID={job_id} | Duration={duration_ms}ms | Code={error_code} | Message='{user_message}'")
+                logger.debug(f"[JOB_FAILED] JobID={job_id} | Duration={duration_ms}ms | Code={error_code} | Message='{clean_msg}'")
             else:
-                logger.error(f"[JOB_FAILED] JobID={job_id} | Duration={duration_ms}ms | Code={error_code} | Message='{user_message}'")
+                logger.error(f"[JOB_FAILED] JobID={job_id} | Duration={duration_ms}ms | Code={error_code} | Message='{clean_msg}'")
 
 
 def cancel_job(job_id: str) -> bool:
@@ -378,10 +380,10 @@ def get_job_state(job_id: str) -> dict:
                 VIDEO_JOBS[job_id] = job
 
         if job:
-            # Stale job watchdog guard: if status is processing but no update for 300s, auto-fail
+            # Stale job watchdog guard: if status is processing but no update for 1800s (30m), auto-fail
             now = time.time()
             updated_at = job.get("updated_at", now)
-            if job.get("status") == "processing" and (now - updated_at) > 300:
+            if job.get("status") == "processing" and (now - updated_at) > 1800:
                 logger.warning(f"[STALE_JOB_WATCHDOG] JobID={job_id} stalled for {round(now - updated_at, 1)}s. Auto-failing.")
                 job["status"] = "failed"
                 job["stage"] = JobStage.FAILED
@@ -398,6 +400,7 @@ def get_job_state(job_id: str) -> dict:
             return dict(job)
 
         return None
+
 
 
 def submit_video_processing_task(target_func, *args, **kwargs):

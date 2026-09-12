@@ -136,7 +136,9 @@ def create_audio(article_id):
         logger.info(f"[VOICE_VALIDATED] article_id={target_article.id} | lang={target_lang} | provider={dubbing_src} | size={val_audio.get('file_size_bytes')}B")
     except TTSError as e:
         logger.error(f"[VOICE_FAILED] article_id={target_article.id} | lang={target_lang} | err={e}")
-        return error_response("VOICE_GENERATION_FAILED", str(e), 500)
+        from app.services.error_validator import sanitize_user_error_message
+        clean_msg = sanitize_user_error_message("VOICE_GENERATION_FAILED", str(e))
+        return error_response("VOICE_GENERATION_FAILED", clean_msg, 500)
 
     audio = Audio(article_id=target_article.id, language=target_lang, source_text_hash=text_hash, file_path=filename, dubbing_source=dubbing_src)
     db.session.add(audio)

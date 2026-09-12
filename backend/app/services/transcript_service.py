@@ -290,22 +290,23 @@ def fetch_transcript(video_id: str, request_id: str = None, timeout_seconds: int
             raise TranscriptError("TRANSCRIPT_FETCH_TIMEOUT", "Retrieving captions timed out. Processing audio fallback.")
 
 
-def get_transcript_result(video_id: str, request_id: str = None, on_audio_fallback=None, on_whisper_transcribe=None, on_progress=None):
+def get_transcript_result(video_id: str, request_id: str = None, on_audio_fallback=None, on_whisper_transcribe=None, on_progress=None, provided_transcript: str = None):
     from app.services.transcript_providers import TranscriptProviderChain, TranscriptResult
     chain = TranscriptProviderChain()
-    return chain.execute(video_id, request_id, on_audio_fallback, on_whisper_transcribe, on_progress)
+    return chain.execute(video_id, request_id, on_audio_fallback, on_whisper_transcribe, on_progress, provided_transcript=provided_transcript)
 
 
-def get_transcript(video_id: str, request_id: str = None, on_audio_fallback=None, on_whisper_transcribe=None, on_progress=None):
+def get_transcript(video_id: str, request_id: str = None, on_audio_fallback=None, on_whisper_transcribe=None, on_progress=None, provided_transcript: str = None):
     """Primary entry point used by the video-processing route.
-    Delegates to TranscriptProviderChain to try YouTube captions, alternative APIs, and Whisper fallback."""
-    res = get_transcript_result(video_id, request_id, on_audio_fallback, on_whisper_transcribe, on_progress)
+    Delegates to TranscriptProviderChain to try Supadata, YouTube captions, client captions, alternative APIs, and Whisper fallback."""
+    res = get_transcript_result(video_id, request_id, on_audio_fallback, on_whisper_transcribe, on_progress, provided_transcript=provided_transcript)
     if callable(on_progress):
         try:
             on_progress(85, "Transcript completed")
         except Exception:
             pass
     return res.transcript_text, res.source_language, res.source
+
 
 
 from app.services.error_validator import contains_raw_error_text
@@ -339,7 +340,7 @@ def clean_transcript(raw_text: str) -> str:
     text = re.sub(r"\[?\b\d{1,2}:\d{2}(:\d{2})?\b\]?", "", text)
 
     # 2. Remove bracketed & parenthetical noise tags / music notes
-    text = re.sub(r"\[.*?\]|\(.*?\)|♪|♫", "", text)
+    text = re.sub(r"♪.*?♪|♫.*?♫|\[.*?\]|\(.*?\)|♪|♫", "", text)
 
     # 3. Filter promotional phrases & greetings/outros
     for pattern in PROMOTIONAL_PATTERNS:

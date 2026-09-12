@@ -173,7 +173,7 @@ def _download_full_audio(video_id: str, workdir: str) -> str:
             raise WhisperError("VIDEO_AGE_RESTRICTED", "This video has access restrictions.")
         if any(kw in err_lower for kw in ["video unavailable", "404", "does not exist"]):
             raise WhisperError("VIDEO_UNAVAILABLE", "This YouTube video is unavailable, deleted, or does not exist.")
-        raise WhisperError("AUDIO_EXTRACTION_FAILED", f"Could not download video audio: {err_str}")
+        raise WhisperError("AUDIO_EXTRACTION_FAILED", "The video's audio could not be extracted.")
 
     expected = os.path.join(workdir, "audio.mp3")
     t1 = time.time()
@@ -183,7 +183,7 @@ def _download_full_audio(video_id: str, workdir: str) -> str:
         return expected
     else:
         logger.warning(f"[AUDIO] ERROR failed: extracted file {expected} does not exist or is 0 bytes after {elapsed}ms")
-        raise WhisperError("AUDIO_EXTRACTION_FAILED", "Extracted audio file is empty or missing.")
+        raise WhisperError("AUDIO_EXTRACTION_FAILED", "The video's audio could not be extracted.")
 
 
 def transcribe_with_whisper(video_id: str, request_id: str = None, job_id: str = None, on_progress=None):
@@ -309,7 +309,7 @@ def transcribe_with_whisper(video_id: str, request_id: str = None, job_id: str =
         except Exception as e:
             err_trace = traceback.format_exc()
             logger.error(f"[WHISPER] ERROR unexpected failure during worker execution: {e}\nTraceback:\n{err_trace}")
-            result_container["error"] = WhisperError("WHISPER_TRANSCRIPTION_FAILED", f"Speech transcription failed: {e}")
+            result_container["error"] = WhisperError("WHISPER_TRANSCRIPTION_FAILED", "Speech transcription failed.")
         finally:
             shutil.rmtree(workdir, ignore_errors=True)
 
@@ -317,7 +317,7 @@ def transcribe_with_whisper(video_id: str, request_id: str = None, job_id: str =
     worker_thread.start()
 
     # Stall detection loop: monitors progress every 2 seconds
-    STALL_TIMEOUT_SECONDS = 90       # 90s without any segment progress update
+    STALL_TIMEOUT_SECONDS = 300      # 300s without any segment progress update
     MAX_TOTAL_LIMIT_SECONDS = 36000  # 10 hours total cap for ultra-long videos
 
     while worker_thread.is_alive():
@@ -344,4 +344,3 @@ def transcribe_with_whisper(video_id: str, request_id: str = None, job_id: str =
         return result_container["data"]
 
     raise WhisperError("WHISPER_TRANSCRIPTION_FAILED", "Whisper transcription ended without returning data.")
-

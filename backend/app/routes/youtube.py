@@ -113,7 +113,8 @@ def run_async_video_processing(app, job_id: str, url: str, video_id: str, user_i
                     request_id=job_id,
                     on_audio_fallback=on_audio_fallback,
                     on_whisper_transcribe=on_whisper_transcribing,
-                    on_progress=on_progress
+                    on_progress=on_progress,
+                    provided_transcript=provided_transcript
                 )
                 t_trans_end = time.time()
                 if source == "captions":

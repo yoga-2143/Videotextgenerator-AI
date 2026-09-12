@@ -273,6 +273,34 @@ class WhisperProvider(TranscriptProvider):
         return None
 
 
+class ClientProvidedTranscriptProvider(TranscriptProvider):
+    """Integrates client-assisted transcript text provided directly by the frontend browser proxy."""
+    name: str = "client_provided"
+
+    def fetch(self, video_id: str, request_id: Optional[str] = None, provided_transcript: Optional[str] = None) -> Optional[TranscriptResult]:
+        if not provided_transcript or not provided_transcript.strip():
+            return None
+        req_id = request_id or str(uuid.uuid4())
+        logger.info(f"[PROVIDER_ATTEMPT] Provider=client_provided | JobID={req_id[:8]} | VideoID={video_id}")
+        try:
+            from app.services.transcript_service import clean_transcript
+            cleaned = clean_transcript(provided_transcript)
+            if cleaned:
+                res = TranscriptResult(
+                    video_id=video_id,
+                    source="client_provided",
+                    source_language="en",
+                    transcript_text=cleaned,
+                    confidence=0.95,
+                )
+                if validate_transcript(res, video_id):
+                    logger.info(f"[PROVIDER_SUCCESS] Provider=client_provided | JobID={req_id[:8]} | VideoID={video_id}")
+                    return res
+        except Exception as e:
+            logger.warning(f"[PROVIDER_FAILED] Provider=client_provided | JobID={req_id[:8]} | Error={e}")
+        return None
+
+
 class SupadataTranscriptProvider(TranscriptProvider):
     """Primary cloud-safe transcript provider that uses the Supadata YouTube transcript API."""
     name: str = "supadata"
@@ -332,12 +360,13 @@ class SupadataTranscriptProvider(TranscriptProvider):
 
 
 class TranscriptProviderChain:
-    """Executes configured transcript providers in sequence with structured logging and bot protection guards."""
+    """Executes configured transcript providers in exact sequence with structured logging and error isolation."""
 
     def __init__(self, providers: Optional[List[TranscriptProvider]] = None):
         self.providers = providers or [
             SupadataTranscriptProvider(),
             YouTubeCaptionProvider(),
+            ClientProvidedTranscriptProvider(),
             AlternativeTranscriptProvider(),
         ]
 
@@ -347,17 +376,21 @@ class TranscriptProviderChain:
         request_id: Optional[str] = None,
         on_audio_fallback=None,
         on_whisper_transcribe=None,
-        on_progress=None
+        on_progress=None,
+        provided_transcript: Optional[str] = None
     ) -> TranscriptResult:
         req_id = request_id or str(uuid.uuid4())
         logger.info(f"[PROVIDER_CHAIN_STARTED] JobID={req_id[:8]} | VideoID={video_id} | ProviderCount={len(self.providers)}")
 
-        bot_protection_detected = False
         last_error = None
 
         for provider in self.providers:
             try:
-                res = provider.fetch(video_id, req_id)
+                if provider.name == "client_provided" and provided_transcript:
+                    res = provider.fetch(video_id, req_id, provided_transcript=provided_transcript)
+                else:
+                    res = provider.fetch(video_id, req_id)
+
                 if res and validate_transcript(res, video_id):
                     logger.info(
                         f"[PROVIDER_CHAIN_SUCCESS] JobID={req_id[:8]} | VideoID={video_id} | "
@@ -368,37 +401,33 @@ class TranscriptProviderChain:
                 from app.services.transcript_service import TranscriptError
                 if isinstance(e, TranscriptError):
                     last_error = e
-                    if e.code == "BOT_PROTECTION_BLOCKED":
-                        bot_protection_detected = True
-                        logger.warning(f"[PROVIDER_CHAIN_NOTE] Bot protection blocked provider '{provider.name}' for video {video_id}")
+                    logger.warning(f"[PROVIDER_CHAIN_NOTE] Provider '{provider.name}' failed for video {video_id}: Code={e.code} Message={e.message}")
+                    if e.code in ["VIDEO_PRIVATE", "VIDEO_UNAVAILABLE", "INVALID_URL", "VIDEO_AGE_RESTRICTED"]:
+                        # Absolute video accessibility failure - stop chain
+                        raise e
                 else:
                     logger.warning(f"[PROVIDER_CHAIN_NOTE] Provider '{provider.name}' raised unexpected error for video {video_id}: {e}")
 
-        # Check if fatal non-retryable error occurred before attempting Whisper
-        FATAL_CODES = {"VIDEO_PRIVATE", "VIDEO_UNAVAILABLE", "INVALID_URL", "VIDEO_AGE_RESTRICTED", "BOT_PROTECTION_BLOCKED", "PROVIDER_RATE_LIMIT"}
-        if last_error and getattr(last_error, "code", None) in FATAL_CODES:
-            raise last_error
-
-        # If captions & alternative providers failed due to non-fatal errors, check if Whisper audio download should be attempted
+        # If captions & alternative providers failed, check if Whisper STT audio fallback should be attempted
         whisper_enabled = os.getenv("WHISPER_FALLBACK_ENABLED", "true").lower() == "true"
-        if whisper_enabled and not bot_protection_detected:
-            whisper_prov = WhisperProvider(on_audio_fallback, on_whisper_transcribe, on_progress)
-            res = whisper_prov.fetch(video_id, req_id)
-            if res and validate_transcript(res, video_id):
-                return res
+        if whisper_enabled:
+            try:
+                whisper_prov = WhisperProvider(on_audio_fallback, on_whisper_transcribe, on_progress)
+                res = whisper_prov.fetch(video_id, req_id)
+                if res and validate_transcript(res, video_id):
+                    return res
+            except Exception as whisper_err:
+                from app.services.transcript_service import TranscriptError
+                from app.services.error_validator import sanitize_user_error_message
+                code = getattr(whisper_err, "code", "TRANSCRIPT_UNAVAILABLE")
+                if code in ["VIDEO_PRIVATE", "VIDEO_UNAVAILABLE", "INVALID_URL", "VIDEO_AGE_RESTRICTED"]:
+                    raise whisper_err
+                clean_msg = sanitize_user_error_message(code, str(whisper_err))
+                raise TranscriptError(code, clean_msg)
 
-        if bot_protection_detected:
-            from app.services.transcript_service import TranscriptError
-            raise TranscriptError(
-                "BOT_PROTECTION_BLOCKED",
-                "YouTube anti-bot verification is active for this video on cloud server. Please try again or paste transcript text."
-            )
-
-        if last_error:
-            raise last_error
-
+        # If all transcript providers failed, raise a clean, user-safe error message
         from app.services.transcript_service import TranscriptError
         raise TranscriptError(
             "TRANSCRIPT_UNAVAILABLE",
-            "No transcript was available, and audio transcription could not be completed."
+            "Unable to retrieve a transcript for this video right now. Please try again later."
         )
