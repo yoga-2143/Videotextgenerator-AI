@@ -93,7 +93,7 @@ class YouTubeCaptionProvider(TranscriptProvider):
         
         from app.services.transcript_service import fetch_transcript, clean_transcript, TranscriptError
         try:
-            raw_text, lang = fetch_transcript(video_id, req_id)
+            raw_text, lang = fetch_transcript(video_id, req_id, timeout_seconds=8)
             cleaned = clean_transcript(raw_text)
             if cleaned:
                 res = TranscriptResult(
@@ -136,7 +136,7 @@ class AlternativeTranscriptProvider(TranscriptProvider):
             try:
                 url = f"https://api.supadata.ai/v1/youtube/transcript?videoId={video_id}"
                 headers = {"x-api-key": self.supadata_api_key, "User-Agent": "VETRI/1.0"}
-                r = requests.get(url, headers=headers, timeout=20)
+                r = requests.get(url, headers=headers, timeout=6)
                 if r.status_code == 200:
                     data = r.json()
                     chunks = []
@@ -172,7 +172,7 @@ class AlternativeTranscriptProvider(TranscriptProvider):
         if self.alternative_api_url:
             try:
                 endpoint = f"{self.alternative_api_url.rstrip('/')}/transcript?video_id={video_id}"
-                r = requests.get(endpoint, timeout=20)
+                r = requests.get(endpoint, timeout=6)
                 if r.status_code == 200:
                     data = r.json()
                     raw_text = data.get("transcript") or data.get("text") or ""
@@ -197,7 +197,7 @@ class AlternativeTranscriptProvider(TranscriptProvider):
         try:
             timedtext_url = f"https://www.youtube.com/api/timedtext?v={video_id}&lang=en"
             proxy_endpoint = f"https://api.allorigins.win/raw?url={requests.utils.quote(timedtext_url)}"
-            r = requests.get(proxy_endpoint, timeout=15)
+            r = requests.get(proxy_endpoint, timeout=6)
             if r.status_code == 200 and "<text" in r.text:
                 import xml.etree.ElementTree as ET
                 root = ET.fromstring(r.text)
@@ -324,7 +324,7 @@ class SupadataTranscriptProvider(TranscriptProvider):
         try:
             url = f"https://api.supadata.ai/v1/youtube/transcript?videoId={video_id}"
             headers = {"x-api-key": self.api_key, "User-Agent": "VETRI/1.0"}
-            r = requests.get(url, headers=headers, timeout=20)
+            r = requests.get(url, headers=headers, timeout=6)
             if r.status_code == 200:
                 data = r.json()
                 chunks = []
@@ -382,21 +382,31 @@ class TranscriptProviderChain:
         provided_transcript: Optional[str] = None
     ) -> TranscriptResult:
         req_id = request_id or str(uuid.uuid4())
-        logger.info(f"[PROVIDER_CHAIN_STARTED] JobID={req_id[:8]} | VideoID={video_id} | ProviderCount={len(self.providers)}")
+        t_chain_start = time.time()
+        logger.info(f"[PERF] transcript_start | JobID={req_id[:8]} | VideoID={video_id} | ProviderCount={len(self.providers)}")
 
         last_error = None
 
         for provider in self.providers:
+            t_p_start = time.time()
+            logger.info(f"[PERF] {provider.name}_start | JobID={req_id[:8]}")
             try:
                 res = provider.fetch(video_id, req_id, provided_transcript=provided_transcript)
+                t_p_end = time.time()
+                elapsed_p = round((t_p_end - t_p_start) * 1000, 2)
+                logger.info(f"[PERF] {provider.name}_end | JobID={req_id[:8]} | Duration={elapsed_p}ms | Success={bool(res)}")
 
                 if res and validate_transcript(res, video_id):
+                    t_total = round((time.time() - t_chain_start) * 1000, 2)
                     logger.info(
-                        f"[PROVIDER_CHAIN_SUCCESS] JobID={req_id[:8]} | VideoID={video_id} | "
-                        f"Provider={provider.name} | Source={res.source} | Hash={res.source_text_hash[:16]}"
+                        f"[PERF] transcript_ready | JobID={req_id[:8]} | VideoID={video_id} | "
+                        f"Provider={provider.name} | Source={res.source} | TotalDuration={t_total}ms"
                     )
                     return res
             except Exception as e:
+                t_p_end = time.time()
+                elapsed_p = round((t_p_end - t_p_start) * 1000, 2)
+                logger.info(f"[PERF] {provider.name}_end | JobID={req_id[:8]} | Duration={elapsed_p}ms | Error={type(e).__name__}")
                 from app.services.transcript_service import TranscriptError
                 if isinstance(e, TranscriptError):
                     last_error = e
@@ -410,12 +420,23 @@ class TranscriptProviderChain:
         # If captions & alternative providers failed, check if Whisper STT audio fallback should be attempted
         whisper_enabled = os.getenv("WHISPER_FALLBACK_ENABLED", "true").lower() == "true"
         if whisper_enabled:
+            t_w_start = time.time()
+            logger.info(f"[PERF] whisper_start | JobID={req_id[:8]} | VideoID={video_id}")
             try:
                 whisper_prov = WhisperProvider(on_audio_fallback, on_whisper_transcribe, on_progress)
                 res = whisper_prov.fetch(video_id, req_id)
+                t_w_end = time.time()
+                elapsed_w = round((t_w_end - t_w_start) * 1000, 2)
+                logger.info(f"[PERF] whisper_end | JobID={req_id[:8]} | Duration={elapsed_w}ms | Success={bool(res)}")
+
                 if res and validate_transcript(res, video_id):
+                    t_total = round((time.time() - t_chain_start) * 1000, 2)
+                    logger.info(f"[PERF] transcript_ready | JobID={req_id[:8]} | Source=whisper | TotalDuration={t_total}ms")
                     return res
             except Exception as whisper_err:
+                t_w_end = time.time()
+                elapsed_w = round((t_w_end - t_w_start) * 1000, 2)
+                logger.info(f"[PERF] whisper_end | JobID={req_id[:8]} | Duration={elapsed_w}ms | Error={type(whisper_err).__name__}")
                 from app.services.transcript_service import TranscriptError
                 from app.services.error_validator import sanitize_user_error_message
                 code = getattr(whisper_err, "code", "TRANSCRIPT_UNAVAILABLE")

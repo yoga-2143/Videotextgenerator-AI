@@ -232,6 +232,7 @@ def create_video_job(url: str, video_id: str) -> str:
         "message": STAGE_MESSAGES[JobStage.QUEUED],
         "result_available": False,
         "stage_timings": {},
+        "extra_data": {},
         "created_at": now,
         "updated_at": now,
         "result": None,
@@ -245,7 +246,7 @@ def create_video_job(url: str, video_id: str) -> str:
     return job_id
 
 
-def update_job_stage(job_id: str, stage: str, message_override: str = None, progress_override: int = None):
+def update_job_stage(job_id: str, stage: str, message_override: str = None, progress_override: int = None, extra_data: dict = None):
     with JOBS_LOCK:
         if job_id not in VIDEO_JOBS:
             db_job = _get_job_from_db(job_id)
@@ -271,6 +272,13 @@ def update_job_stage(job_id: str, stage: str, message_override: str = None, prog
         job["progress"] = progress_override if progress_override is not None else STAGE_PROGRESS.get(stage, job["progress"])
         job["message"] = message_override or STAGE_MESSAGES.get(stage, stage)
         job["updated_at"] = now
+
+        if extra_data and isinstance(extra_data, dict):
+            if "extra_data" not in job or not isinstance(job.get("extra_data"), dict):
+                job["extra_data"] = {}
+            job["extra_data"].update(extra_data)
+            for k, v in extra_data.items():
+                job[k] = v
 
         if stage == JobStage.COMPLETED:
             job["status"] = "completed"

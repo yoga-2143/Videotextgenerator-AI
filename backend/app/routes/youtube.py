@@ -35,6 +35,7 @@ IN_FLIGHT_LOCK = threading.Lock()
 def run_async_video_processing(app, job_id: str, url: str, video_id: str, user_id=None, force_reprocess: bool = False, provided_transcript: str = None):
     """Background worker function executed asynchronously by job manager thread pool."""
     t_start = time.time()
+    logger.info(f"[PERF] job_created | JobID={job_id} | VideoID={video_id} | URL={url}")
     logger.info(f"[PROCESS] Request started | JobID={job_id} | VideoID={video_id} | URL={url}")
 
     with app.app_context():
@@ -68,6 +69,7 @@ def run_async_video_processing(app, job_id: str, url: str, video_id: str, user_i
                     }
                     PROCESS_CACHE[video_id] = res_data
                     set_job_result(job_id, res_data)
+                    logger.info(f"[PERF] cached_response_ready | JobID={job_id} | Elapsed={round((time.time() - t_start) * 1000, 2)}ms")
                     logger.info(f"[PROCESS] Response sent (cached) | JobID={job_id}")
                     return
 
@@ -82,6 +84,7 @@ def run_async_video_processing(app, job_id: str, url: str, video_id: str, user_i
                 db.session.commit()
 
             # Stage: Fetching Transcript / Speech-to-Text Fallback
+            logger.info(f"[PERF] transcript_start | JobID={job_id} | Elapsed={round((time.time() - t_start) * 1000, 2)}ms")
             update_job_stage(job_id, JobStage.FETCHING_TRANSCRIPT, progress_override=20, message_override="Checking transcript...")
             t_trans_start = time.time()
 
@@ -89,7 +92,14 @@ def run_async_video_processing(app, job_id: str, url: str, video_id: str, user_i
                 cleaned = clean_transcript(provided_transcript)
                 lang = "en"
                 source = "captions"
-                update_job_stage(job_id, JobStage.TRANSCRIPT_FOUND, progress_override=30, message_override="Transcript received. Preparing text...")
+                update_job_stage(
+                    job_id,
+                    JobStage.TRANSCRIPT_FOUND,
+                    progress_override=30,
+                    message_override="Transcript received. Preparing text...",
+                    extra_data={"transcript": {"text": cleaned, "language": lang, "source": source}}
+                )
+                logger.info(f"[PERF] transcript_ready | JobID={job_id} | Source=client_provided | Chars={len(cleaned)} | Elapsed={round((time.time() - t_start) * 1000, 2)}ms")
                 logger.info(f"[TRANSCRIPT_STAGE_SUCCESS] JobID={job_id} | Source=captions (client_provided) | Len={len(cleaned)}")
             else:
                 # Helper callbacks passed to transcript service
@@ -117,8 +127,15 @@ def run_async_video_processing(app, job_id: str, url: str, video_id: str, user_i
                     provided_transcript=provided_transcript
                 )
                 t_trans_end = time.time()
+                logger.info(f"[PERF] transcript_ready | JobID={job_id} | Source={source} | Chars={len(cleaned)} | Elapsed={round((time.time() - t_start) * 1000, 2)}ms")
                 if source in ["captions", "supadata", "client_provided", "alternative_api"]:
-                    update_job_stage(job_id, JobStage.TRANSCRIPT_FOUND, progress_override=25, message_override="Transcript found. Preparing text...")
+                    update_job_stage(
+                        job_id,
+                        JobStage.TRANSCRIPT_FOUND,
+                        progress_override=25,
+                        message_override="Transcript found. Preparing text...",
+                        extra_data={"transcript": {"text": cleaned, "language": lang, "source": source}}
+                    )
                 logger.info(f"[TRANSCRIPT_STAGE_SUCCESS] JobID={job_id} | Source={source} | Duration={round(t_trans_end - t_trans_start, 2)}s")
 
             # Enrich Metadata
@@ -176,6 +193,7 @@ def run_async_video_processing(app, job_id: str, url: str, video_id: str, user_i
             update_job_stage(job_id, JobStage.VALIDATING_TEXT, progress_override=40, message_override="Checking spelling and grammar...")
 
             # Stage: Content & Important Information Generation
+            logger.info(f"[PERF] article_start | JobID={job_id} | Elapsed={round((time.time() - t_start) * 1000, 2)}ms")
             logger.info(f"[ARTICLE_GENERATION_STARTED] JobID={job_id} | VideoID={video_id}")
             update_job_stage(job_id, JobStage.GENERATING_IMPORTANT_CONTENT, progress_override=50, message_override="Preparing IMPORTANT CONTENT...")
             t_gen_start = time.time()
@@ -185,12 +203,25 @@ def run_async_video_processing(app, job_id: str, url: str, video_id: str, user_i
             article_text = article_to_plain_text(article_json)
             t_gen_end = time.time()
             _log_stage_hashes("IMPORTANT_CONTENT", article_text)
+            logger.info(f"[PERF] article_ready | JobID={job_id} | Elapsed={round((time.time() - t_start) * 1000, 2)}ms")
             logger.info(f"[ARTICLE_GENERATION_COMPLETED] JobID={job_id} | VideoID={video_id} | Duration={round((t_gen_end - t_gen_start) * 1000, 2)}ms")
 
             # Stage: DB Persistence
             logger.info(f"[DATABASE] Save started | JobID={job_id}")
-            update_job_stage(job_id, JobStage.SAVING, progress_override=65, message_override="Saving results...")
             orig_lang = lang if (lang and is_translation_supported(lang)) else "en"
+            update_job_stage(
+                job_id,
+                JobStage.SAVING,
+                progress_override=65,
+                message_override="Saving results...",
+                extra_data={
+                    "article": {
+                        "title": article_json.get("title", video.title or "Untitled"),
+                        "content": article_text,
+                        "language": orig_lang
+                    }
+                }
+            )
             article = Article.query.filter_by(video_id=video.id, language=orig_lang).first()
             if article:
                 article.title = article_json.get("title", video.title or "Untitled")
@@ -230,6 +261,7 @@ def run_async_video_processing(app, job_id: str, url: str, video_id: str, user_i
             }
             PROCESS_CACHE[video_id] = res_data
             set_job_result(job_id, res_data)
+            logger.info(f"[PERF] process_job_completed | JobID={job_id} | Total duration={round((time.time() - t_start) * 1000, 2)}ms")
             logger.info(f"[PROCESS] Response sent | JobID={job_id} | Total duration={round(time.time() - t_start, 2)}s")
 
         except TranscriptError as e:

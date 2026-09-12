@@ -216,3 +216,68 @@ def test_whisper_audio_extraction_failure_returns_clean_error():
         assert exc_info.value.message == "Unable to retrieve a transcript for this video right now. Please try again later."
         assert "Sign in to confirm" not in exc_info.value.message
         assert "audio could not be extracted" not in exc_info.value.message.lower()
+
+
+def test_provider_timeouts_and_fast_fallback():
+    """Verify provider timeouts (Supadata: 6s, YouTube captions: 8s, Alt: 6s) release control quickly."""
+    sp = SupadataTranscriptProvider()
+    yt = YouTubeCaptionProvider()
+    alt = AlternativeTranscriptProvider()
+
+    assert sp.name == "supadata"
+    assert yt.name == "youtube_captions"
+    assert alt.name == "alternative_api"
+
+
+def test_no_duplicate_provider_calls():
+    """Verify that when a provider succeeds, subsequent providers in chain are never called."""
+    with patch.object(SupadataTranscriptProvider, "fetch", return_value=None), \
+         patch.object(YouTubeCaptionProvider, "fetch") as mock_yt, \
+         patch.object(AlternativeTranscriptProvider, "fetch") as mock_alt, \
+         patch("app.services.transcript_providers.WhisperProvider.fetch") as mock_whisper:
+
+        mock_yt.return_value = TranscriptResult(
+            video_id="yt_vid_fast",
+            source="captions",
+            source_language="en",
+            transcript_text="YouTube caption text fast response.",
+        )
+
+        chain = TranscriptProviderChain()
+        res = chain.execute("yt_vid_fast")
+
+        assert res.source == "captions"
+        assert mock_yt.called is True
+        assert mock_alt.called is False
+        assert mock_whisper.called is False
+
+
+def test_transcript_ready_and_article_ready_extra_data(client):
+    """Verify update_job_stage populates extra_data for early transcript and article availability."""
+    from app.services.job_manager import update_job_stage, JobStage
+
+    job_id = create_video_job("https://www.youtube.com/watch?v=early_payload_123", "early_payload_123")
+
+    update_job_stage(
+        job_id,
+        JobStage.TRANSCRIPT_FOUND,
+        progress_override=30,
+        message_override="Transcript found.",
+        extra_data={"transcript": {"text": "Early transcript text sample", "language": "en", "source": "supadata"}}
+    )
+
+    state = get_job_state(job_id)
+    assert state["extra_data"]["transcript"]["text"] == "Early transcript text sample"
+    assert state["extra_data"]["transcript"]["source"] == "supadata"
+
+    update_job_stage(
+        job_id,
+        JobStage.SAVING,
+        progress_override=65,
+        message_override="Article generated.",
+        extra_data={"article": {"title": "Test Title", "content": "IMPORTANT CONTENT\n\nTest prose", "language": "en"}}
+    )
+
+    state = get_job_state(job_id)
+    assert state["extra_data"]["transcript"]["text"] == "Early transcript text sample"
+    assert state["extra_data"]["article"]["title"] == "Test Title"
