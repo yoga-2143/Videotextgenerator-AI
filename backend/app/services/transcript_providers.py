@@ -80,14 +80,14 @@ class TranscriptProvider(ABC):
     name: str = "base_provider"
 
     @abstractmethod
-    def fetch(self, video_id: str, request_id: Optional[str] = None) -> Optional[TranscriptResult]:
+    def fetch(self, video_id: str, request_id: Optional[str] = None, provided_transcript: Optional[str] = None) -> Optional[TranscriptResult]:
         pass
 
 
 class YouTubeCaptionProvider(TranscriptProvider):
     name: str = "youtube_captions"
 
-    def fetch(self, video_id: str, request_id: Optional[str] = None) -> Optional[TranscriptResult]:
+    def fetch(self, video_id: str, request_id: Optional[str] = None, provided_transcript: Optional[str] = None) -> Optional[TranscriptResult]:
         req_id = request_id or str(uuid.uuid4())
         logger.info(f"[PROVIDER_ATTEMPT] Provider=youtube_captions | JobID={req_id[:8]} | VideoID={video_id}")
         
@@ -107,7 +107,7 @@ class YouTubeCaptionProvider(TranscriptProvider):
                     return res
         except TranscriptError as e:
             logger.warning(f"[PROVIDER_FAILED] Provider=youtube_captions | JobID={req_id[:8]} | Code={e.code} | Message={e.message}")
-            if e.code in ["VIDEO_PRIVATE", "INVALID_URL", "VIDEO_UNAVAILABLE", "VIDEO_AGE_RESTRICTED", "BOT_PROTECTION_BLOCKED", "PROVIDER_RATE_LIMIT"]:
+            if e.code in ["VIDEO_PRIVATE", "INVALID_URL", "VIDEO_UNAVAILABLE", "VIDEO_AGE_RESTRICTED"]:
                 raise e
         except Exception as e:
             logger.warning(f"[PROVIDER_FAILED] Provider=youtube_captions | JobID={req_id[:8]} | Exception={e}")
@@ -127,7 +127,7 @@ class AlternativeTranscriptProvider(TranscriptProvider):
     def is_available(self) -> bool:
         return True
 
-    def fetch(self, video_id: str, request_id: Optional[str] = None) -> Optional[TranscriptResult]:
+    def fetch(self, video_id: str, request_id: Optional[str] = None, provided_transcript: Optional[str] = None) -> Optional[TranscriptResult]:
         req_id = request_id or str(uuid.uuid4())
         logger.info(f"[PROVIDER_ATTEMPT] Provider=alternative_api | JobID={req_id[:8]} | VideoID={video_id}")
 
@@ -163,7 +163,7 @@ class AlternativeTranscriptProvider(TranscriptProvider):
                             confidence=0.95,
                         )
                         if validate_transcript(res, video_id):
-                            logger.info(f"[PROVIDER_SUCCESS] Provider=alternative_api (Supadata) | JobID={req_id[:8]} | VideoID={video_id}")
+                            logger.info(f"TRANSCRIPT_PROVIDER=SUPADATA TRANSCRIPT_STATUS=SUCCESS VideoID={video_id} JobID={req_id[:8]}")
                             return res
             except Exception as e:
                 logger.warning(f"[PROVIDER_FAILED] Provider=alternative_api (Supadata) | JobID={req_id[:8]} | Error={e}")
@@ -231,7 +231,7 @@ class WhisperProvider(TranscriptProvider):
         self.on_whisper_transcribe = on_whisper_transcribe
         self.on_progress = on_progress
 
-    def fetch(self, video_id: str, request_id: Optional[str] = None) -> Optional[TranscriptResult]:
+    def fetch(self, video_id: str, request_id: Optional[str] = None, provided_transcript: Optional[str] = None) -> Optional[TranscriptResult]:
         req_id = request_id or str(uuid.uuid4())
         logger.info(f"[PROVIDER_ATTEMPT] Provider=whisper | JobID={req_id[:8]} | VideoID={video_id}")
 
@@ -265,10 +265,12 @@ class WhisperProvider(TranscriptProvider):
                 return res
         except WhisperError as e:
             logger.warning(f"[PROVIDER_FAILED] Provider=whisper | JobID={req_id[:8]} | Code={e.code} | Message={e.message}")
-            raise TranscriptError(e.code, e.message)
+            from app.services.error_validator import sanitize_user_error_message
+            clean_msg = sanitize_user_error_message("TRANSCRIPT_UNAVAILABLE", e.message)
+            raise TranscriptError("TRANSCRIPT_UNAVAILABLE", clean_msg)
         except Exception as e:
             logger.exception(f"[PROVIDER_FAILED] Provider=whisper | JobID={req_id[:8]} | Error={e}")
-            raise TranscriptError("WHISPER_TRANSCRIPTION_FAILED", "Audio was obtained, but speech transcription failed.")
+            raise TranscriptError("TRANSCRIPT_UNAVAILABLE", "Unable to retrieve a transcript for this video right now. Please try again later.")
 
         return None
 
@@ -311,7 +313,7 @@ class SupadataTranscriptProvider(TranscriptProvider):
     def is_available(self) -> bool:
         return bool(self.api_key)
 
-    def fetch(self, video_id: str, request_id: Optional[str] = None) -> Optional[TranscriptResult]:
+    def fetch(self, video_id: str, request_id: Optional[str] = None, provided_transcript: Optional[str] = None) -> Optional[TranscriptResult]:
         req_id = request_id or str(uuid.uuid4())
         if not self.is_available():
             logger.info(f"[PROVIDER_SKIP] Provider=supadata | Reason=NO_SUPADATA_API_KEY_CONFIGURED")
@@ -349,7 +351,7 @@ class SupadataTranscriptProvider(TranscriptProvider):
                         confidence=0.98,
                     )
                     if validate_transcript(res, video_id):
-                        logger.info(f"[PROVIDER_SUCCESS] Provider=supadata | JobID={req_id[:8]} | VideoID={video_id} | Hash={res.source_text_hash[:16]}")
+                        logger.info(f"TRANSCRIPT_PROVIDER=SUPADATA TRANSCRIPT_STATUS=SUCCESS VideoID={video_id} JobID={req_id[:8]} Hash={res.source_text_hash[:16]}")
                         return res
             else:
                 logger.warning(f"[PROVIDER_FAILED] Provider=supadata | JobID={req_id[:8]} | Status={r.status_code} | Text={r.text[:200]}")
@@ -364,9 +366,9 @@ class TranscriptProviderChain:
 
     def __init__(self, providers: Optional[List[TranscriptProvider]] = None):
         self.providers = providers or [
+            ClientProvidedTranscriptProvider(),
             SupadataTranscriptProvider(),
             YouTubeCaptionProvider(),
-            ClientProvidedTranscriptProvider(),
             AlternativeTranscriptProvider(),
         ]
 
@@ -386,10 +388,7 @@ class TranscriptProviderChain:
 
         for provider in self.providers:
             try:
-                if provider.name == "client_provided" and provided_transcript:
-                    res = provider.fetch(video_id, req_id, provided_transcript=provided_transcript)
-                else:
-                    res = provider.fetch(video_id, req_id)
+                res = provider.fetch(video_id, req_id, provided_transcript=provided_transcript)
 
                 if res and validate_transcript(res, video_id):
                     logger.info(
@@ -422,8 +421,8 @@ class TranscriptProviderChain:
                 code = getattr(whisper_err, "code", "TRANSCRIPT_UNAVAILABLE")
                 if code in ["VIDEO_PRIVATE", "VIDEO_UNAVAILABLE", "INVALID_URL", "VIDEO_AGE_RESTRICTED"]:
                     raise whisper_err
-                clean_msg = sanitize_user_error_message(code, str(whisper_err))
-                raise TranscriptError(code, clean_msg)
+                clean_msg = sanitize_user_error_message("TRANSCRIPT_UNAVAILABLE", str(whisper_err))
+                raise TranscriptError("TRANSCRIPT_UNAVAILABLE", clean_msg)
 
         # If all transcript providers failed, raise a clean, user-safe error message
         from app.services.transcript_service import TranscriptError

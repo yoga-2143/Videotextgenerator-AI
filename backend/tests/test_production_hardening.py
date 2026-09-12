@@ -173,3 +173,46 @@ def test_S_T_retry_and_stalled_job_handling(client):
     assert state["error"]["retryable"] is True
     assert "Sign in to confirm" not in state["error"]["message"]
     assert state["error"]["message"] == "Speech-to-text processing took too long. Please try again."
+
+
+def test_supadata_success_bypasses_audio_extraction():
+    """Verify that when Supadata returns a valid transcript, Whisper audio extraction is NEVER called."""
+    with patch.object(SupadataTranscriptProvider, "fetch") as mock_supadata, \
+         patch("app.services.transcript_providers.WhisperProvider.fetch") as mock_whisper:
+
+        mock_supadata.return_value = TranscriptResult(
+            video_id="supadata_test_vid",
+            source="supadata",
+            source_language="en",
+            transcript_text="This is a valid transcript retrieved cleanly from Supadata API.",
+        )
+
+        chain = TranscriptProviderChain()
+        res = chain.execute("supadata_test_vid")
+
+        assert res is not None
+        assert res.source == "supadata"
+        assert "valid transcript retrieved cleanly from Supadata" in res.transcript_text
+        assert mock_whisper.called is False, "Whisper audio extraction must NOT be called when Supadata succeeds!"
+
+
+def test_whisper_audio_extraction_failure_returns_clean_error():
+    """Verify that if Whisper audio extraction fails, the user gets a clean error message and NOT 'audio could not be extracted'."""
+    from app.services.whisper_service import WhisperError
+
+    with patch.object(SupadataTranscriptProvider, "fetch", return_value=None), \
+         patch.object(YouTubeCaptionProvider, "fetch", return_value=None), \
+         patch.object(ClientProvidedTranscriptProvider, "fetch", return_value=None), \
+         patch.object(AlternativeTranscriptProvider, "fetch", return_value=None), \
+         patch("app.services.transcript_providers.WhisperProvider.fetch") as mock_whisper:
+
+        mock_whisper.side_effect = WhisperError("AUDIO_EXTRACTION_FAILED", "ERROR: [youtube] Sign in to confirm you're not a bot")
+
+        chain = TranscriptProviderChain()
+        with pytest.raises(TranscriptError) as exc_info:
+            chain.execute("fail_vid_999")
+
+        assert exc_info.value.code == "TRANSCRIPT_UNAVAILABLE"
+        assert exc_info.value.message == "Unable to retrieve a transcript for this video right now. Please try again later."
+        assert "Sign in to confirm" not in exc_info.value.message
+        assert "audio could not be extracted" not in exc_info.value.message.lower()

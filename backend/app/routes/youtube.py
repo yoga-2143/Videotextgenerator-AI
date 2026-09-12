@@ -117,8 +117,8 @@ def run_async_video_processing(app, job_id: str, url: str, video_id: str, user_i
                     provided_transcript=provided_transcript
                 )
                 t_trans_end = time.time()
-                if source == "captions":
-                    update_job_stage(job_id, JobStage.TRANSCRIPT_FOUND, progress_override=30, message_override="Transcript found. Preparing text...")
+                if source in ["captions", "supadata", "client_provided", "alternative_api"]:
+                    update_job_stage(job_id, JobStage.TRANSCRIPT_FOUND, progress_override=25, message_override="Transcript found. Preparing text...")
                 logger.info(f"[TRANSCRIPT_STAGE_SUCCESS] JobID={job_id} | Source={source} | Duration={round(t_trans_end - t_trans_start, 2)}s")
 
             # Enrich Metadata
@@ -167,17 +167,17 @@ def run_async_video_processing(app, job_id: str, url: str, video_id: str, user_i
 
             # Stage: Fast Cleanup & Repetition Removal
             logger.info(f"[CLEANUP] Started | JobID={job_id}")
-            update_job_stage(job_id, JobStage.CLEANING_TEXT, progress_override=75, message_override="Cleaning transcript...")
-            update_job_stage(job_id, JobStage.REMOVING_REPETITION, progress_override=82, message_override="Removing repetition...")
+            update_job_stage(job_id, JobStage.CLEANING_TEXT, progress_override=30, message_override="Cleaning transcript...")
+            update_job_stage(job_id, JobStage.REMOVING_REPETITION, progress_override=35, message_override="Removing repetition...")
             _log_stage_hashes("CLEANED_TEXT", cleaned)
             logger.info(f"[CLEANUP] Completed | JobID={job_id}")
 
             # Stage: Spelling & Grammar Check / Proofreading
-            update_job_stage(job_id, JobStage.VALIDATING_TEXT, progress_override=88, message_override="Checking spelling and grammar...")
+            update_job_stage(job_id, JobStage.VALIDATING_TEXT, progress_override=40, message_override="Checking spelling and grammar...")
 
             # Stage: Content & Important Information Generation
             logger.info(f"[ARTICLE_GENERATION_STARTED] JobID={job_id} | VideoID={video_id}")
-            update_job_stage(job_id, JobStage.GENERATING_IMPORTANT_CONTENT, progress_override=92, message_override="Preparing IMPORTANT CONTENT...")
+            update_job_stage(job_id, JobStage.GENERATING_IMPORTANT_CONTENT, progress_override=50, message_override="Preparing IMPORTANT CONTENT...")
             t_gen_start = time.time()
             ranked_text = rank_important_sentences(cleaned)
             llm = get_llm_provider()
@@ -189,7 +189,7 @@ def run_async_video_processing(app, job_id: str, url: str, video_id: str, user_i
 
             # Stage: DB Persistence
             logger.info(f"[DATABASE] Save started | JobID={job_id}")
-            update_job_stage(job_id, JobStage.SAVING, progress_override=98, message_override="Saving results...")
+            update_job_stage(job_id, JobStage.SAVING, progress_override=65, message_override="Saving results...")
             orig_lang = lang if (lang and is_translation_supported(lang)) else "en"
             article = Article.query.filter_by(video_id=video.id, language=orig_lang).first()
             if article:

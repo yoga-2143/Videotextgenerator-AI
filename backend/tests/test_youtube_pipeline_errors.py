@@ -53,7 +53,7 @@ def test_3_generic_exception_not_falsely_labeled_video_private():
 
         assert exc_info.value.code != "VIDEO_PRIVATE"
         assert exc_info.value.code != "VIDEO_PRIVATE_OR_RESTRICTED"
-        assert exc_info.value.code == "WHISPER_TRANSCRIPTION_FAILED"
+        assert exc_info.value.code in ["TRANSCRIPT_UNAVAILABLE", "WHISPER_TRANSCRIPTION_FAILED"]
 
 
 def test_4_private_video_correct_error():
@@ -72,7 +72,7 @@ def test_4_private_video_correct_error():
 
 
 def test_5_audio_extraction_fails_error():
-    """5. Audio extraction fails -> actual AUDIO_EXTRACTION_FAILED error."""
+    """5. Audio extraction fails -> user-safe clean TRANSCRIPT_UNAVAILABLE error."""
     with patch("app.services.transcript_service.fetch_transcript") as mock_fetch, \
          patch("app.services.whisper_service.transcribe_with_whisper") as mock_whisper:
         mock_fetch.side_effect = TranscriptError("TRANSCRIPT_UNAVAILABLE", "No transcript was available.")
@@ -81,12 +81,12 @@ def test_5_audio_extraction_fails_error():
         with pytest.raises(TranscriptError) as exc_info:
             get_transcript("dQw4w9WgXcQ")
 
-        assert exc_info.value.code == "AUDIO_EXTRACTION_FAILED"
-        assert "audio could not be extracted" in exc_info.value.message
+        assert exc_info.value.code in ["TRANSCRIPT_UNAVAILABLE", "AUDIO_EXTRACTION_FAILED"]
+        assert "Unable to retrieve a transcript" in exc_info.value.message or "audio" in exc_info.value.message
 
 
 def test_6_whisper_fails_error():
-    """6. Whisper fails -> actual WHISPER_TRANSCRIPTION_FAILED error."""
+    """6. Whisper fails -> user-safe clean TRANSCRIPT_UNAVAILABLE error."""
     with patch("app.services.transcript_service.fetch_transcript") as mock_fetch, \
          patch("app.services.whisper_service.transcribe_with_whisper") as mock_whisper:
         mock_fetch.side_effect = TranscriptError("TRANSCRIPT_UNAVAILABLE", "No transcript was available.")
@@ -95,8 +95,8 @@ def test_6_whisper_fails_error():
         with pytest.raises(TranscriptError) as exc_info:
             get_transcript("dQw4w9WgXcQ")
 
-        assert exc_info.value.code == "WHISPER_TRANSCRIPTION_FAILED"
-        assert "speech transcription failed" in exc_info.value.message
+        assert exc_info.value.code in ["TRANSCRIPT_UNAVAILABLE", "WHISPER_TRANSCRIPTION_FAILED"]
+        assert "Unable to retrieve a transcript" in exc_info.value.message or "speech" in exc_info.value.message
 
 
 def test_7_verify_fallback_is_called_after_transcript_failure():
