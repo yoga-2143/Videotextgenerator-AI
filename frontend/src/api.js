@@ -145,10 +145,10 @@ export const api = {
                 backendOrigin = new URL(BASE).origin
               } else if (import.meta.env.VITE_API_BASE_URL && import.meta.env.VITE_API_BASE_URL.startsWith('http')) {
                 backendOrigin = new URL(import.meta.env.VITE_API_BASE_URL).origin
-              } else {
-                backendOrigin = 'https://vetri-backend-tyv7.onrender.com'
+              } else if (typeof window !== 'undefined' && window.location && window.location.origin) {
+                backendOrigin = window.location.origin
               }
-              const fullUrl = `${backendOrigin}${rawUrl}`
+              const fullUrl = backendOrigin ? `${backendOrigin}${rawUrl}` : rawUrl
               res.audioUrl = fullUrl
               res.audio_url = fullUrl
             }

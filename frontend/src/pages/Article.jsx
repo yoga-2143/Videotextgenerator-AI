@@ -683,9 +683,11 @@ export default function Article() {
           onPlay={() => setIsPlaying(true)}
           onPause={() => setIsPlaying(false)}
           onEnded={() => setIsPlaying(false)}
-          onError={() => {
-            setError('Unable to generate voice. Please try again.')
-            setAudioNotice('')
+          onError={(e) => {
+            if (audioRef.current && audioRef.current.error && audioRef.current.error.code) {
+              setError('Unable to load audio playback. Please tap the speaker button to retry.')
+              setAudioNotice('')
+            }
           }}
         />
       )}

@@ -164,11 +164,15 @@ def create_audio(article_id):
     })
 
 
-@tts_bp.route("/audio/<path:filename>", methods=["GET"])
+@tts_bp.route("/audio/<path:filename>", methods=["GET", "OPTIONS"])
 def serve_audio(filename):
     from app.services.tts_service import AUDIO_DIR
     full_path = os.path.join(AUDIO_DIR, filename)
     if not os.path.isfile(full_path):
         return error_response("NOT_FOUND", "Audio file not found on server.", 404)
     mimetype = "audio/wav" if filename.lower().endswith(".wav") else "audio/mpeg"
-    return send_file(full_path, mimetype=mimetype)
+    response = send_file(full_path, mimetype=mimetype, conditional=True)
+    response.headers["Access-Control-Allow-Origin"] = "*"
+    response.headers["Access-Control-Allow-Methods"] = "GET, OPTIONS"
+    response.headers["Accept-Ranges"] = "bytes"
+    return response

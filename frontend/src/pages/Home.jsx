@@ -27,7 +27,7 @@ export default function Home() {
           Understand, translate, and listen in your supported languages.
         </p>
 
-        <div className="mt-10 flex items-center justify-center gap-4 font-mono text-sm sm:text-base font-bold uppercase tracking-[0.2em] text-wave bg-panel border border-line rounded-full px-8 py-3 shadow-md">
+        <div className="mt-10 flex flex-wrap items-center justify-center gap-3 sm:gap-4 font-mono text-xs sm:text-base font-bold uppercase tracking-[0.15em] sm:tracking-[0.2em] text-wave bg-panel border border-line rounded-full px-4 sm:px-8 py-3 shadow-md max-w-full">
           <span>Understand</span>
           <span className="text-mute">•</span>
           <span>Translate</span>
