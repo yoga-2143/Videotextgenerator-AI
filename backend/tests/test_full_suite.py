@@ -4,7 +4,8 @@ import json
 import tempfile
 from unittest.mock import MagicMock
 from app import db
-from app.models.models import Video, Transcript, Article, Audio, TranslationCache
+from app.models.models import User, Video, Transcript, Article, Audio, TranslationCache
+from app.utils.auth_utils import issue_token
 from app.services.transcript_service import extract_video_id, TranscriptError
 from app.services.job_manager import create_video_job, get_job_state, update_job_stage, set_job_result, set_job_error, JobStage
 from app.services.llm_service import clean_speech_sentence, synthesize_clean_prose, proofread_content
