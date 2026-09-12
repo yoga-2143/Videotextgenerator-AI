@@ -2,15 +2,18 @@ import os
 from flask import Blueprint, jsonify
 from app import db
 from app.models.models import Video, Article, Audio, TranslationCache
-from app.utils.auth_utils import require_auth
+from app.utils.auth_utils import get_current_user_optional, require_auth
 
 history_bp = Blueprint("history", __name__)
 
 
 @history_bp.route("/history", methods=["GET"])
-@require_auth
-def get_history(user):
-    videos = Video.query.filter(Video.user_id == user.id, Video.status == "done").order_by(Video.created_at.desc()).all()
+def get_history():
+    user = get_current_user_optional()
+    if user:
+        videos = Video.query.filter(Video.user_id == user.id, Video.status == "done").order_by(Video.created_at.desc()).all()
+    else:
+        videos = Video.query.filter(Video.status == "done").order_by(Video.created_at.desc()).all()
     return jsonify({
         "success": True,
         "data": [{
@@ -27,9 +30,13 @@ def get_history(user):
 
 
 @history_bp.route("/history/<int:video_id>", methods=["DELETE"])
-@require_auth
-def delete_history_item(user, video_id):
-    video = Video.query.filter(Video.id == video_id, Video.user_id == user.id).first()
+def delete_history_item(video_id):
+    user = get_current_user_optional()
+    if user:
+        video = Video.query.filter(Video.id == video_id, Video.user_id == user.id).first()
+    else:
+        video = db.session.get(Video, video_id)
+
     if not video:
         return jsonify({
             "success": False,
@@ -73,9 +80,13 @@ def delete_history_item(user, video_id):
 
 @history_bp.route("/history/clear_all", methods=["DELETE"])
 @history_bp.route("/history/all", methods=["DELETE"])
-@require_auth
-def clear_all_history(user):
-    videos = Video.query.filter(Video.user_id == user.id).all()
+def clear_all_history():
+    user = get_current_user_optional()
+    if user:
+        videos = Video.query.filter(Video.user_id == user.id).all()
+    else:
+        videos = Video.query.all()
+
     if not videos:
         return jsonify({
             "success": True,
@@ -119,13 +130,13 @@ def clear_all_history(user):
 
 
 @history_bp.route("/articles/<int:article_id>/publish", methods=["POST"])
-@require_auth
-def publish_article(user, article_id):
+def publish_article(article_id):
     from datetime import datetime
     from app.models.models import Article
 
     article = db.session.get(Article, article_id)
-    if not article or (article.video and article.video.user_id != user.id):
+    user = get_current_user_optional()
+    if not article or (user and article.video and article.video.user_id and article.video.user_id != user.id):
         return jsonify({
             "success": False,
             "error": {"code": "NOT_FOUND", "message": "Article not found."}

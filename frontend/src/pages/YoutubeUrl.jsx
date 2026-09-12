@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../api'
+import { saveLocalHistoryItem } from '../utils/localHistory'
 
 export default function YoutubeUrl() {
   const [url, setUrl] = useState('')
@@ -66,6 +67,7 @@ export default function YoutubeUrl() {
           setLoading(false)
 
           const data = jobState.result
+          saveLocalHistoryItem(data)
           const targetId = data?.article?.id || data?.video_id
           if (targetId) {
             navigate(`/article/${targetId}`, { state: { video: data } })
@@ -156,6 +158,7 @@ export default function YoutubeUrl() {
       } else if (res && res.article) {
         // Direct cached resolve
         stopTimer()
+        saveLocalHistoryItem(res)
         const targetId = res.article?.id || res.video_id || res.id
         navigate(`/article/${targetId}`, { state: { video: res } })
       } else {
@@ -168,6 +171,7 @@ export default function YoutubeUrl() {
       try {
         const data = await api.processVideo(trimmed)
         stopTimer()
+        saveLocalHistoryItem(data)
         const targetId = data?.article?.id || data?.video_id || data?.id
         if (targetId) {
           navigate(`/article/${targetId}`, { state: { video: data } })

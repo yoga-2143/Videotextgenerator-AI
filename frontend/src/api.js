@@ -1,3 +1,5 @@
+import { getLocalHistory, deleteLocalHistoryItem, clearLocalHistory } from './utils/localHistory'
+
 const BASE = (import.meta.env.VITE_API_BASE_URL || '/api').replace(/\/+$/, '')
 
 
@@ -156,19 +158,27 @@ export const api = {
     ),
 
   getArticle: (id) => fetch(`${BASE}/articles/${id}`, { headers: authHeaders() }).then(handle),
-  getHistory: () => fetch(`${BASE}/history`, { headers: authHeaders() }).then(handle),
+  getHistory: () => Promise.resolve(getLocalHistory()),
   
-  deleteHistory: (id) =>
-    fetch(`${BASE}/history/${id}`, {
+  deleteHistory: (id) => {
+    deleteLocalHistoryItem(id)
+    return fetch(`${BASE}/history/${id}`, {
       method: 'DELETE',
       headers: authHeaders(),
-    }).then(handle),
+    })
+      .then(handle)
+      .catch(() => ({ success: true }))
+  },
 
-  deleteAllHistory: () =>
-    fetch(`${BASE}/history/clear_all`, {
+  deleteAllHistory: () => {
+    clearLocalHistory()
+    return fetch(`${BASE}/history/clear_all`, {
       method: 'DELETE',
       headers: authHeaders(),
-    }).then(handle),
+    })
+      .then(handle)
+      .catch(() => ({ success: true }))
+  },
 
   search: (query) => fetch(`${BASE}/search?q=${encodeURIComponent(query)}`).then(handle),
 

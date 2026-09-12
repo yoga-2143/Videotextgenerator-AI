@@ -485,10 +485,6 @@ def get_article(identifier):
     user = get_current_user_optional()
     user_id = user.id if user else None
 
-    if not article.is_published:
-        if article.video and article.video.user_id and article.video.user_id != user_id:
-            return error_response("FORBIDDEN", "You do not have permission to view this article.", 403)
-
     if article.content and not article.content.startswith("IMPORTANT CONTENT"):
         clean_prose = synthesize_clean_prose(article.content, article.video.title if article.video else "")
         article.content = f"IMPORTANT CONTENT\n\n{clean_prose}"

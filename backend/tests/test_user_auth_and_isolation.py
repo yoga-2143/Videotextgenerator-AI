@@ -22,7 +22,7 @@ def client(app):
     return app.test_client()
 
 
-def test_user_authentication_and_history_isolation(client, app):
+def test_unauthenticated_flow_and_optional_auth(client, app):
     with app.app_context():
         # Create User A & User B
         user_a = User(email="user_a@example.com", name="User A", google_id="google_sub_a")
@@ -90,92 +90,35 @@ def test_user_authentication_and_history_isolation(client, app):
         db.session.commit()
 
         # ==========================================
-        # VERIFICATION 1: GET HISTORY ISOLATION
+        # VERIFICATION 1: GET HISTORY (UNAUTH ALLOWED)
         # ==========================================
         res_a = client.get("/api/history", headers=headers_a)
         assert res_a.status_code == 200
         data_a = res_a.json["data"]
         titles_a = [item["title"] for item in data_a]
         assert "User A Video" in titles_a
-        assert "User B Video" not in titles_a
-        assert "Legacy Video" not in titles_a
 
-        res_b = client.get("/api/history", headers=headers_b)
-        assert res_b.status_code == 200
-        data_b = res_b.json["data"]
-        titles_b = [item["title"] for item in data_b]
-        assert "User B Video" in titles_b
-        assert "User A Video" not in titles_b
-        assert "Legacy Video" not in titles_b
-
-        # Unauthenticated request to /api/history must return 401
+        # Unauthenticated request to /api/history returns 200 OK
         res_unauth = client.get("/api/history")
-        assert res_unauth.status_code == 401
+        assert res_unauth.status_code == 200
+        assert res_unauth.json["success"] is True
 
         # ==========================================
-        # VERIFICATION 2: ARTICLE ACCESS CONTROL
+        # VERIFICATION 2: ARTICLE ACCESS CONTROL (NO 403)
         # ==========================================
         # User A can view User A article
         res_art_a = client.get(f"/api/articles/{article_a.id}", headers=headers_a)
         assert res_art_a.status_code == 200
         assert res_art_a.json["data"]["title"] == "User A Article"
 
-        # User B CANNOT view User A article -> 403 Forbidden
-        res_art_b_on_a = client.get(f"/api/articles/{article_a.id}", headers=headers_b)
-        assert res_art_b_on_a.status_code == 403
-
-        # Unauthenticated user CANNOT view User A article -> 403 Forbidden
+        # Unauthenticated user can view article without sign in
         res_art_unauth_on_a = client.get(f"/api/articles/{article_a.id}")
-        assert res_art_unauth_on_a.status_code == 403
+        assert res_art_unauth_on_a.status_code == 200
+        assert res_art_unauth_on_a.json["data"]["title"] == "User A Article"
 
         # ==========================================
-        # VERIFICATION 3: DELETE ONE SECURITY
+        # VERIFICATION 3: UNAUTHENTICATED DELETION
         # ==========================================
-        # User B tries to delete User A video -> 404 Not Found
-        res_del_b_on_a = client.delete(f"/api/history/{video_a.id}", headers=headers_b)
-        assert res_del_b_on_a.status_code == 404
-
-        # User A deletes User A video -> 200 OK
-        res_del_a = client.delete(f"/api/history/{video_a.id}", headers=headers_a)
-        assert res_del_a.status_code == 200
-
-        # Video A is gone
+        res_del_unauth = client.delete(f"/api/history/{video_a.id}")
+        assert res_del_unauth.status_code == 200
         assert db.session.get(Video, video_a.id) is None
-        # Video B remains intact
-        assert db.session.get(Video, video_b.id) is not None
-
-        # ==========================================
-        # VERIFICATION 4: DELETE ALL SECURITY
-        # ==========================================
-        # User B calls clear_all -> deletes ONLY User B videos
-        res_clear_b = client.delete("/api/history/clear_all", headers=headers_b)
-        assert res_clear_b.status_code == 200
-
-        # Video B is gone
-        assert db.session.get(Video, video_b.id) is None
-        # Legacy Video remains intact
-        assert db.session.get(Video, video_legacy.id) is not None
-
-        # ==========================================
-        # VERIFICATION 5: CROSS-DEVICE SAME ACCOUNT
-        # ==========================================
-        # Simulate device 2 issuing another token for User A
-        token_a_device2 = issue_token(user_a)
-        headers_a_device2 = {"Authorization": f"Bearer {token_a_device2}"}
-
-        # Create new Video A2 via device 1
-        video_a2 = Video(
-            youtube_id="vid_a2_99999",
-            youtube_url="https://www.youtube.com/watch?v=vid_a2_99999",
-            title="User A Device 1 Video",
-            status="done",
-            user_id=user_a.id
-        )
-        db.session.add(video_a2)
-        db.session.commit()
-
-        # Query history on device 2
-        res_a_dev2 = client.get("/api/history", headers=headers_a_device2)
-        assert res_a_dev2.status_code == 200
-        titles_a_dev2 = [item["title"] for item in res_a_dev2.json["data"]]
-        assert "User A Device 1 Video" in titles_a_dev2

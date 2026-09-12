@@ -33,9 +33,6 @@ def create_audio(article_id):
     from app.utils.auth_utils import get_current_user_optional
     user = get_current_user_optional()
     user_id = user.id if user else None
-    if article.video and article.video.user_id and not article.is_published:
-        if not user_id or article.video.user_id != user_id:
-            return error_response("FORBIDDEN", "You do not have permission to access this article.", 403)
 
     target_lang = requested_lang or article.language
 

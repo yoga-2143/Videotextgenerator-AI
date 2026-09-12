@@ -41,9 +41,9 @@ def test_languages_endpoint(client):
 
 
 def test_history_endpoint(client, app):
-    # Unauthenticated request returns 401
+    # Unauthenticated request returns 200 OK
     resp_unauth = client.get("/api/history")
-    assert resp_unauth.status_code == 401
+    assert resp_unauth.status_code == 200
 
     with app.app_context():
         user = User(email="test_hist@example.com")
