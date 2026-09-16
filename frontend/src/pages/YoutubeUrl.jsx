@@ -45,6 +45,7 @@ export default function YoutubeUrl() {
 
     const isBotProtection = normalizedCode === 'BOT_PROTECTION_BLOCKED' || normalizedCode === 'BOT_PROTECTION'
     const isNoCaptions = normalizedCode === 'NO_CAPTIONS'
+    const isDatabaseError = normalizedCode === 'DATABASE_ERROR' || normalizedCode === 'DB_ERROR'
 
     if (isVerifiedRestriction) {
       return {
@@ -54,6 +55,17 @@ export default function YoutubeUrl() {
         statusLabel: 'URL Access Status:',
         statusBadge: 'Video Can’t Be Processed — Restricted Video',
         showTryAgain: false,
+      }
+    }
+
+    if (isDatabaseError) {
+      return {
+        title: '⚠️ Processing could not be saved',
+        message: 'A database error occurred while saving the processing results. Please try again.',
+        suggestion: '',
+        statusLabel: 'Database Status:',
+        statusBadge: 'Processing Could Not Be Saved',
+        showTryAgain: true,
       }
     }
 

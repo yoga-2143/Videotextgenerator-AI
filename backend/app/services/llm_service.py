@@ -169,8 +169,40 @@ def clean_speech_sentence(sentence: str, full_context: str = "") -> str:
     return s
 
 
+STOP_WORDS_SEMANTIC = {
+    "the", "is", "are", "a", "an", "in", "of", "to", "and", "that", "this",
+    "video", "content", "topic", "explains", "discusses", "provides", "shows",
+    "with", "for", "on", "it", "by", "as", "at", "from", "was", "were", "be", "been"
+}
+
+
+def get_key_stems(text: str) -> set:
+    words = re.findall(r"\b[a-zA-Z]{3,}\b", text.lower())
+    stems = set()
+    for w in words:
+        if w in STOP_WORDS_SEMANTIC:
+            continue
+        if w in ["ai", "ui", "ux", "aws", "api", "sql", "css", "js"]:
+            stems.add(w)
+        else:
+            stems.add(w[:5])
+    return stems
+
+
+def is_semantic_duplicate(text1: str, text2: str) -> bool:
+    s1 = get_key_stems(text1)
+    s2 = get_key_stems(text2)
+    if not s1 or not s2:
+        return False
+    intersection = s1.intersection(s2)
+    min_len = min(len(s1), len(s2))
+    jaccard = len(intersection) / len(s1.union(s2))
+    containment = len(intersection) / min_len
+    return containment >= 0.65 or jaccard >= 0.50
+
+
 def synthesize_clean_prose(ranked_text: str, video_title: str = "") -> str:
-    """Takes raw transcript text and synthesizes clean, natural prose paragraphs structured into exactly 5 points."""
+    """Takes raw transcript text and synthesizes clean, natural prose paragraphs structured into exactly 5 points with semantic deduplication."""
     text = re.sub(r"^IMPORTANT CONTENT\s*", "", ranked_text.strip(), flags=re.IGNORECASE).strip()
     text = re.sub(r"(?i)\bKey\s*Point\s*\d*:?\s*", "", text)
     text = re.sub(r"(?i)\bChapter\s*\d*:?\s*", "", text)
@@ -182,24 +214,43 @@ def synthesize_clean_prose(ranked_text: str, video_title: str = "") -> str:
 
     for raw_s in raw_sentences:
         clean_s = clean_speech_sentence(raw_s, full_context=ranked_text)
-        if clean_s:
-            norm_s = re.sub(r"[^\w\s]", "", clean_s.lower()).strip()
-            if norm_s and norm_s not in seen_norm and len(norm_s) > 4:
-                seen_norm.add(norm_s)
-                cleaned_sentences.append(clean_s)
+        if not clean_s:
+            continue
+        norm_s = re.sub(r"[^\w\s]", "", clean_s.lower()).strip()
+        if not norm_s or len(norm_s) <= 4 or norm_s in seen_norm:
+            continue
 
-    title_clean = video_title.strip() if video_title and not contains_raw_error_text(video_title) else "YouTube Video"
+        # Semantic duplicate check against already accepted sentences
+        if any(is_semantic_duplicate(clean_s, existing) for existing in cleaned_sentences):
+            continue
+
+        seen_norm.add(norm_s)
+        cleaned_sentences.append(clean_s)
+
+    # If sentence count < 5, attempt clause splitting to extract distinct supported facts from current transcript
+    if len(cleaned_sentences) < 5:
+        expanded = []
+        for s in cleaned_sentences:
+            clauses = [c.strip() for c in re.split(r"\s*;\s*|\s*,\s+(?:and|because|while|whereas|as well as|which)\s+", s) if len(c.strip()) > 15]
+            if len(clauses) > 1:
+                for c in clauses:
+                    c_clean = c[0].upper() + c[1:]
+                    if not c_clean.endswith((".", "!", "?")):
+                        c_clean += "."
+                    if not any(is_semantic_duplicate(c_clean, existing) for existing in expanded):
+                        expanded.append(c_clean)
+            else:
+                if not any(is_semantic_duplicate(s, existing) for existing in expanded):
+                    expanded.append(s)
+        if len(expanded) >= len(cleaned_sentences):
+            cleaned_sentences = expanded
+
+    title_clean = video_title.strip() if video_title and not contains_raw_error_text(video_title) else "Current Video"
 
     if not cleaned_sentences:
-        return (
-            f"• Overview of key concepts and essential topics presented in '{title_clean}'.\n\n"
-            f"• Core principles, definitions, and main themes covered throughout the discussion.\n\n"
-            f"• Practical examples, step-by-step insights, and contextual details explained by the speaker.\n\n"
-            f"• Critical analysis, important takeaways, and key operational methods highlighted in the video.\n\n"
-            f"• Final conclusions, summary recommendations, and closing insights from the presentation."
-        )
+        cleaned_sentences = [f"Content summary for video '{title_clean}'."]
 
-    # Ensure we distribute the cleaned sentences into EXACTLY 5 points/paragraphs
+    # Distribute available cleaned sentences into EXACTLY 5 distinct points/paragraphs
     total_s = len(cleaned_sentences)
     paragraphs = []
 
@@ -216,19 +267,18 @@ def synthesize_clean_prose(ranked_text: str, video_title: str = "") -> str:
         for s in cleaned_sentences:
             paragraphs.append(s)
 
-        fallback_templates = [
-            f"Overview of core topics and primary insights presented in '{title_clean}'.",
-            f"Detailed breakdown of key methods and concepts discussed by the speaker.",
-            f"Practical application and important contextual details covered in the video.",
-            f"Key observations, structural takeaways, and essential definitions from the discussion.",
-            f"Summary conclusion and final recommendations provided in the presentation."
+        fallback_descs = [
+            f"Core principles and definitions explained in '{title_clean}'.",
+            f"Practical insights and implementation details from the presentation.",
+            f"Key observations and structural takeaways from the speaker.",
+            f"Summary recommendations and closing points covered in the discussion."
         ]
-        for t in fallback_templates:
+        for desc in fallback_descs:
             if len(paragraphs) >= 5:
                 break
-            norm_t = re.sub(r"[^\w\s]", "", t.lower()).strip()
-            if not any(norm_t in re.sub(r"[^\w\s]", "", p.lower()) for p in paragraphs):
-                paragraphs.append(t)
+            norm_d = re.sub(r"[^\w\s]", "", desc.lower()).strip()
+            if not any(norm_d in re.sub(r"[^\w\s]", "", p.lower()) for p in paragraphs):
+                paragraphs.append(desc)
 
     formatted = []
     for p in paragraphs[:5]:

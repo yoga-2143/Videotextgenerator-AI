@@ -7,6 +7,9 @@ via faster-whisper — no API key, no per-request cost, nothing leaves your
 machine.
 """
 import os
+os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
 import time
 import tempfile
 import shutil
@@ -133,7 +136,7 @@ def _download_full_audio(video_id: str, workdir: str) -> str:
         "quiet": True,
         "no_warnings": True,
         "socket_timeout": 30,
-        "max_filesize": 100 * 1024 * 1024,
+        "max_filesize": 500 * 1024 * 1024,
         "nocheckcertificate": True,
         "prefer_insecure": True,
         "geo_bypass": True,

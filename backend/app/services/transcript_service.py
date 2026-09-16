@@ -329,7 +329,7 @@ PROMOTIONAL_PATTERNS = [
     r"(?i)\b(don't forget to|make sure to|be sure to|remember to|please|smash|hit)\b.*?\b(like|subscribe|share|bell|comment|notification)s?\b[^.!?]*[.!?]?",
     r"(?i)\b(welcome back to|welcome to|thanks for watching|see you in the next|catch you in the next|hope you enjoyed|enjoy the video|see ya next time|bye guys|peace out)\b[^.!?]*[.!?]?",
     r"(?i)\b(hey guys|hi everyone|what's up guys|hello everyone|bye guys|see ya|peace out)\b[,.]?",
-    r"(?i)\b(check out the link in the description|link in description|sponsored by|brought to you by|patreon|discord server|follow me on)\b[^.!?]*[.!?]?",
+    r"(?i)\b(check out the link in the description|link in description|sponsored by|sponsored|patreon|discord server|follow me on)\b[^.!?]*[.!?]?",
 ]
 
 SPEECH_NOISE_PATTERNS = [
@@ -361,10 +361,14 @@ def clean_transcript(raw_text: str) -> str:
     for pattern in SPEECH_NOISE_PATTERNS:
         text = re.sub(pattern, "", text, flags=re.IGNORECASE)
 
-    # 5. Remove phrase-level accidental repetitions ("in order to, in order to" -> "in order to")
+    # 5. Deduplicate accidental repetitions
+    # 5a. Remove 3+ consecutive single-word repetitions (STT glitches), preserving 2-word emphasis (e.g. "very, very")
+    text = re.sub(r"\b(\w+)[\s,;:-]+(?:\1[\s,;:-]+\1)\b", r"\1", text, flags=re.IGNORECASE)
+
+    # 5b. Remove phrase-level accidental repetitions (up to 7 words)
     for _ in range(3):
         t_prev = text
-        text = re.sub(r"\b(\w+(?:\s+\w+){1,4})[\s,;:-]+\1\b", r"\1", text, flags=re.IGNORECASE)
+        text = re.sub(r"\b(\w+(?:\s+\w+){1,6})[\s,;:-]+\1\b", r"\1", text, flags=re.IGNORECASE)
         if text == t_prev:
             break
 
