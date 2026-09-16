@@ -1,8 +1,10 @@
 import os
 import pytest
+import json
 from app import create_app, db
-from app.models.models import Video, Article
-from app.services.language_config import CANONICAL_58_LANGUAGES
+from app.models.models import Video, Article, Audio
+from app.services.language_config import CANONICAL_58_LANGUAGES, get_language_config
+from app.services.translator_service import translate_hard_words
 
 
 @pytest.fixture
@@ -20,6 +22,41 @@ def app():
 @pytest.fixture
 def client(app):
     return app.test_client()
+
+
+def test_audit_all_58_languages_registry():
+    """Validates that all 58 languages in CANONICAL_58_LANGUAGES have valid language IDs, NLLB codes, and Edge TTS voice codes."""
+    assert len(CANONICAL_58_LANGUAGES) == 58
+    for lang_item in CANONICAL_58_LANGUAGES:
+        code = lang_item["code"]
+        config = get_language_config(code)
+        assert config is not None, f"Language config missing for {code}"
+        assert config.get("nllb_code") is not None, f"NLLB code missing for {code}"
+        assert isinstance(config["nllb_code"], str) and len(config["nllb_code"]) > 0
+        assert config.get("voice_code") is not None, f"Voice code missing for {code}"
+        assert isinstance(config["voice_code"], str) and len(config["voice_code"]) > 0
+
+
+def test_audit_all_58_languages_hard_words_translation():
+    """Validates that hard word explanations translate into target language structures for all 58 languages."""
+    sample_hard_words = [
+        {
+            "word": "Algorithm",
+            "simple_meaning": "A step-by-step procedure for calculations.",
+            "explanation": "A set of clear rules to solve a problem.",
+            "example": "Sorting numbers using a defined algorithm."
+        }
+    ]
+
+    for lang_item in CANONICAL_58_LANGUAGES:
+        code = lang_item["code"]
+        translated_hw = translate_hard_words(sample_hard_words, code)
+        assert isinstance(translated_hw, list)
+        assert len(translated_hw) == 1
+        assert translated_hw[0]["word"] == "Algorithm"  # Original word token preserved
+        assert "simple_meaning" in translated_hw[0]
+        assert "explanation" in translated_hw[0]
+        assert len(translated_hw[0]["simple_meaning"]) > 0
 
 
 def test_audit_all_58_languages_audio_pipeline(client, app):
@@ -42,6 +79,7 @@ def test_audit_all_58_languages_audio_pipeline(client, app):
             language="en",
             title="Overview of AI Technology",
             content="IMPORTANT CONTENT\n\n- Artificial intelligence transforms language processing.\n- Modern web application support global communication.",
+            hard_words_json=json.dumps([{"word": "Algorithm", "simple_meaning": "A step-by-step procedure"}]),
             is_original=True
         )
         db.session.add(orig_article)
@@ -57,6 +95,7 @@ def test_audit_all_58_languages_audio_pipeline(client, app):
                     language=lang_id,
                     title=f"Article Title for {lang_id}",
                     content=f"IMPORTANT CONTENT in {lang_id}\n\n- Fact 1 for {lang_id}.\n- Fact 2 for {lang_id}.",
+                    hard_words_json=json.dumps([{"word": "Algorithm", "simple_meaning": f"Meaning in {lang_id}"}]),
                     is_original=False
                 )
                 db.session.add(sub_article)

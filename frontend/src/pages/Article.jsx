@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import { api } from '../api'
 import LanguageSelector from '../components/LanguageSelector'
 
@@ -485,6 +485,28 @@ export default function Article() {
 
   return (
     <main className="mx-auto max-w-3xl px-4 sm:px-6 pb-16 sm:pb-24 pt-4 sm:pt-10">
+      {/* YOUTUBE VIDEO URL Header Card */}
+      {(() => {
+        const displayUrl = getYouTubeUrl(article, location.state)
+        if (!displayUrl) return null
+
+        return (
+          <div className="mb-6 rounded-2xl sm:rounded-3xl border border-line bg-panel p-4 sm:p-5 shadow-lg">
+            <span className="font-mono text-xs font-bold uppercase tracking-wider text-wave block mb-1">
+              YOUTUBE VIDEO URL
+            </span>
+            <a
+              href={displayUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-mono text-sm sm:text-base font-semibold text-paper hover:text-wave underline break-all break-words max-w-full inline-block"
+            >
+              {displayUrl}
+            </a>
+          </div>
+        )
+      })()}
+
       {/* Article Controls Toolbar */}
       <div className="mb-6 sm:mb-8 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3.5 sm:gap-4 border-b border-line pb-4 sm:pb-5">
         {/* Language Selector */}
@@ -572,6 +594,56 @@ export default function Article() {
           )
         })()}
       </div>
+
+      {/* Hard Words & Easy Meanings Section */}
+      {(() => {
+        const hardWords = Array.isArray(article?.hard_words)
+          ? article.hard_words
+          : (typeof article?.hard_words_json === 'string'
+              ? (function() { try { return JSON.parse(article.hard_words_json) } catch(e) { return [] } })()
+              : [])
+
+        if (!hardWords || hardWords.length === 0) return null
+
+        return (
+          <div className="mt-8 rounded-3xl border border-line bg-panel p-6 shadow-xl">
+            <div className="flex items-center gap-2.5 mb-5 pb-3 border-b border-line/60">
+              <svg className="w-5 h-5 text-wave shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+              </svg>
+              <h3 className="font-mono text-sm font-bold uppercase tracking-wider text-wave">
+                Hard Words & Easy Meanings
+              </h3>
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2">
+              {hardWords.map((hw, index) => (
+                <div key={index} className="rounded-2xl border border-line/50 bg-black/20 p-4 transition-all hover:border-wave/40">
+                  <div className="font-mono text-base font-bold text-amber-400 mb-1.5 break-words">
+                    {hw.word}
+                  </div>
+                  {hw.simple_meaning && (
+                    <p className="text-sm font-semibold text-paper/90 mb-1.5 leading-snug break-words">
+                      <span className="text-mute font-mono text-xs uppercase mr-1.5 font-normal">Meaning:</span>
+                      {hw.simple_meaning}
+                    </p>
+                  )}
+                  {hw.explanation && (
+                    <p className="text-xs text-mute leading-relaxed mb-1.5 break-words">
+                      <span className="font-mono font-medium text-paper/70">Explanation: </span>
+                      {hw.explanation}
+                    </p>
+                  )}
+                  {hw.example && (
+                    <p className="text-xs text-emerald-400/90 italic font-mono leading-relaxed break-words">
+                      Example: "{hw.example}"
+                    </p>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )
+      })()}
 
       {/* Article Action Toolbar (Icon-Only Buttons Family: Copy, Share, Speaker/Voice) */}
       <div className="mt-6 flex flex-wrap items-center gap-3">

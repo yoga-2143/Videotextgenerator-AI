@@ -1,5 +1,6 @@
 import time
 import uuid
+import json
 import logging
 import threading
 from flask import Blueprint, request, jsonify
@@ -128,14 +129,13 @@ def run_async_video_processing(app, job_id: str, url: str, video_id: str, user_i
                 )
                 t_trans_end = time.time()
                 logger.info(f"[PERF] transcript_ready | JobID={job_id} | Source={source} | Chars={len(cleaned)} | Elapsed={round((time.time() - t_start) * 1000, 2)}ms")
-                if source in ["captions", "supadata", "client_provided", "alternative_api"]:
-                    update_job_stage(
-                        job_id,
-                        JobStage.TRANSCRIPT_FOUND,
-                        progress_override=25,
-                        message_override="Transcript found. Preparing text...",
-                        extra_data={"transcript": {"text": cleaned, "language": lang, "source": source}}
-                    )
+                update_job_stage(
+                    job_id,
+                    JobStage.TRANSCRIPT_FOUND,
+                    progress_override=25,
+                    message_override="Getting transcript...",
+                    extra_data={"transcript": {"text": cleaned, "language": lang, "source": source}}
+                )
                 logger.info(f"[TRANSCRIPT_STAGE_SUCCESS] JobID={job_id} | Source={source} | Duration={round(t_trans_end - t_trans_start, 2)}s")
 
             # Enrich Metadata
@@ -184,18 +184,23 @@ def run_async_video_processing(app, job_id: str, url: str, video_id: str, user_i
 
             # Stage: Fast Cleanup & Repetition Removal
             logger.info(f"[CLEANUP] Started | JobID={job_id}")
-            update_job_stage(job_id, JobStage.CLEANING_TEXT, progress_override=30, message_override="Cleaning transcript...")
-            update_job_stage(job_id, JobStage.REMOVING_REPETITION, progress_override=35, message_override="Removing repetition...")
+            update_job_stage(
+                job_id,
+                JobStage.CLEANING_TEXT,
+                progress_override=35,
+                message_override="Preparing content...",
+                extra_data={"video_title": video.title, "thumbnail_url": video.thumbnail_url, "transcript": {"text": cleaned, "language": lang, "source": source}}
+            )
             _log_stage_hashes("CLEANED_TEXT", cleaned)
             logger.info(f"[CLEANUP] Completed | JobID={job_id}")
 
             # Stage: Spelling & Grammar Check / Proofreading
-            update_job_stage(job_id, JobStage.VALIDATING_TEXT, progress_override=40, message_override="Checking spelling and grammar...")
+            update_job_stage(job_id, JobStage.VALIDATING_TEXT, progress_override=40, message_override="Preparing content...")
 
             # Stage: Content & Important Information Generation
             logger.info(f"[PERF] article_start | JobID={job_id} | Elapsed={round((time.time() - t_start) * 1000, 2)}ms")
             logger.info(f"[ARTICLE_GENERATION_STARTED] JobID={job_id} | VideoID={video_id}")
-            update_job_stage(job_id, JobStage.GENERATING_IMPORTANT_CONTENT, progress_override=50, message_override="Preparing IMPORTANT CONTENT...")
+            update_job_stage(job_id, JobStage.GENERATING_IMPORTANT_CONTENT, progress_override=50, message_override="Generating article...")
             t_gen_start = time.time()
             ranked_text = rank_important_sentences(cleaned)
             llm = get_llm_provider()
@@ -222,16 +227,22 @@ def run_async_video_processing(app, job_id: str, url: str, video_id: str, user_i
                     }
                 }
             )
+            from app.services.hard_words_service import extract_hard_words
+            hard_words_list = extract_hard_words(cleaned, video.title or "")
+            hard_words_json_str = json.dumps(hard_words_list)
+
             article = Article.query.filter_by(video_id=video.id, language=orig_lang).first()
             if article:
                 article.title = article_json.get("title", video.title or "Untitled")
                 article.content = article_text
+                article.hard_words_json = hard_words_json_str
             else:
                 article = Article(
                     video_id=video.id,
                     language=orig_lang,
                     title=article_json.get("title", video.title or "Untitled"),
                     content=article_text,
+                    hard_words_json=hard_words_json_str,
                     is_original=True,
                 )
                 db.session.add(article)
@@ -242,6 +253,9 @@ def run_async_video_processing(app, job_id: str, url: str, video_id: str, user_i
             logger.info(f"[DATABASE] Save completed | JobID={job_id}")
 
             src_hash = _hash_text(article.content)
+            article.source_text_hash = src_hash
+            db.session.commit()
+
             res_data = {
                 "job_id": job_id,
                 "video_id": video.id,
@@ -257,6 +271,7 @@ def run_async_video_processing(app, job_id: str, url: str, video_id: str, user_i
                     "language": orig_lang,
                     "title": article.title,
                     "content": article.content,
+                    "hard_words": hard_words_list,
                 },
             }
             PROCESS_CACHE[video_id] = res_data
@@ -524,8 +539,16 @@ def get_article(identifier):
         db.session.commit()
 
     video_obj = article.video
+    hard_words_list = []
+    if getattr(article, "hard_words_json", None):
+        try:
+            hard_words_list = json.loads(article.hard_words_json)
+        except Exception:
+            hard_words_list = []
+
     return jsonify({"success": True, "data": {
         "id": article.id, "language": article.language, "title": article.title, "content": article.content,
+        "hard_words": hard_words_list,
         "is_published": article.is_published, "published_at": article.published_at.isoformat() if article.published_at else None,
         "transcript_source": video_obj.transcript_source if video_obj else "youtube",
         "video_overview": {

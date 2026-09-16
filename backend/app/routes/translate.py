@@ -1,4 +1,5 @@
 import hashlib
+import json
 import logging
 from flask import Blueprint, jsonify, request
 from app import db
@@ -145,6 +146,19 @@ def translate_article(article_id):
             db.session.add(target_article)
             db.session.commit()
         trans_text_hash = hashlib.sha256(f"{db_cache.content}".encode("utf-8")).hexdigest()[:16]
+
+        cached_hw = []
+        if getattr(db_cache, "hard_words_json", None):
+            try:
+                cached_hw = json.loads(db_cache.hard_words_json)
+            except Exception:
+                cached_hw = []
+        elif getattr(target_article, "hard_words_json", None):
+            try:
+                cached_hw = json.loads(target_article.hard_words_json)
+            except Exception:
+                cached_hw = []
+
         cached_data = {
             "id": target_article.id,
             "article_id": target_article.id,
@@ -160,6 +174,7 @@ def translate_article(article_id):
             "targetLanguage": db_cache.target_language,
             "title": db_cache.title,
             "content": db_cache.content,
+            "hard_words": cached_hw,
             "translation": db_cache.content,
             "translated_text": db_cache.content,
             "translatedArticle": db_cache.content,
@@ -184,6 +199,18 @@ def translate_article(article_id):
     try:
         translated_title = translate_text(source_article.title, target_lang, source_article.language)
         translated_content = translate_text(source_article.content, target_lang, source_article.language)
+
+        orig_hard_words = []
+        if getattr(source_article, "hard_words_json", None):
+            try:
+                orig_hard_words = json.loads(source_article.hard_words_json)
+            except Exception:
+                orig_hard_words = []
+
+        from app.services.translator_service import translate_hard_words
+        trans_hard_words = translate_hard_words(orig_hard_words, target_lang, source_article.language)
+        trans_hard_words_json = json.dumps(trans_hard_words)
+
         from app.services.verification_service import validate_translation
         val_res = validate_translation(translated_content, source_article.content, target_lang)
         if not val_res["valid"]:
@@ -196,11 +223,25 @@ def translate_article(article_id):
         clean_msg = sanitize_user_error_message("TRANSLATION_FAILED", str(e))
         return error_response("TRANSLATION_FAILED", clean_msg, 502)
 
-    new_article = Article(video_id=source_article.video_id, language=target_lang,
-                           title=translated_title, content=translated_content, source_text_hash=current_src_hash, is_original=False)
+    new_article = Article(
+        video_id=source_article.video_id,
+        language=target_lang,
+        title=translated_title,
+        content=translated_content,
+        hard_words_json=trans_hard_words_json,
+        source_text_hash=current_src_hash,
+        is_original=False
+    )
     db.session.add(new_article)
     try:
-        t_cache = TranslationCache(article_id=source_article.id, target_language=target_lang, title=translated_title, content=translated_content, source_text_hash=current_src_hash)
+        t_cache = TranslationCache(
+            article_id=source_article.id,
+            target_language=target_lang,
+            title=translated_title,
+            content=translated_content,
+            hard_words_json=trans_hard_words_json,
+            source_text_hash=current_src_hash
+        )
         db.session.add(t_cache)
     except Exception:
         pass
@@ -224,6 +265,7 @@ def translate_article(article_id):
         "targetLanguage": new_article.language,
         "title": new_article.title,
         "content": new_article.content,
+        "hard_words": trans_hard_words,
         "translation": new_article.content,
         "translated_text": new_article.content,
         "translatedArticle": new_article.content,

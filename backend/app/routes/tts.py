@@ -91,15 +91,16 @@ def create_audio(article_id):
             del AUDIO_CACHE[cache_key]
 
     # Check DB Audio Cache by (article_id, language, source_text_hash)
-    existing_audio = Audio.query.filter_by(article_id=target_article.id, language=target_lang, source_text_hash=text_hash).first()
-
     l_cfg = get_language_config(target_lang) or {}
     v_code = l_cfg.get("voice_code", target_lang)
     v_engine = l_cfg.get("voice_engine", "gtts")
 
+    existing_audio = Audio.query.filter_by(article_id=target_article.id, language=target_lang, source_text_hash=text_hash).first()
+
     if existing_audio:
         full_path = os.path.join(AUDIO_DIR, existing_audio.file_path)
-        if os.path.isfile(full_path) and os.path.getsize(full_path) > 0:
+        is_stale_voice = bool(getattr(existing_audio, "voice_code", None) and getattr(existing_audio, "voice_code") != v_code)
+        if os.path.isfile(full_path) and os.path.getsize(full_path) > 0 and not is_stale_voice:
             res_data = {
                 "article_id": target_article.id,
                 "video_id": target_article.video_id,
@@ -114,7 +115,7 @@ def create_audio(article_id):
                 "voiceAvailable": True
             }
             AUDIO_CACHE[cache_key] = res_data
-            logger.info(f"[VOICE_SUCCESS] [DB_CACHE_HIT] article_id={target_article.id} | lang={target_lang}")
+            logger.info(f"[VOICE_SUCCESS] [DB_CACHE_HIT] article_id={target_article.id} | lang={target_lang} | voice_code={v_code}")
             return jsonify({"success": True, "data": res_data})
         else:
             try:
@@ -140,7 +141,15 @@ def create_audio(article_id):
         clean_msg = sanitize_user_error_message("VOICE_GENERATION_FAILED", str(e))
         return error_response("VOICE_GENERATION_FAILED", clean_msg, 500)
 
-    audio = Audio(article_id=target_article.id, language=target_lang, source_text_hash=text_hash, file_path=filename, dubbing_source=dubbing_src)
+    audio = Audio(
+        article_id=target_article.id,
+        language=target_lang,
+        source_text_hash=text_hash,
+        translated_text_hash=text_hash[:16],
+        voice_code=v_code,
+        file_path=filename,
+        dubbing_source=dubbing_src
+    )
     db.session.add(audio)
     db.session.commit()
 

@@ -281,3 +281,35 @@ def test_transcript_ready_and_article_ready_extra_data(client):
     state = get_job_state(job_id)
     assert state["extra_data"]["transcript"]["text"] == "Early transcript text sample"
     assert state["extra_data"]["article"]["title"] == "Test Title"
+
+
+def test_31_minute_video_supadata_ai_fallback_regression():
+    """31-minute video regression test: Supadata native captions unavailable -> Supadata AI fallback succeeds -> Whisper/yt-dlp NOT called."""
+    with patch("requests.get") as mock_get, \
+         patch("app.services.transcript_providers.WhisperProvider.fetch") as mock_whisper:
+
+        mock_resp_native = MagicMock()
+        mock_resp_native.status_code = 404
+        mock_resp_native.text = "No native captions"
+
+        mock_resp_ai = MagicMock()
+        mock_resp_ai.status_code = 200
+        mock_resp_ai.json.return_value = {
+            "lang": "en",
+            "content": [
+                {"text": "In this 31-minute technical presentation, we analyze artificial intelligence systems."},
+                {"text": "We cover neural networks, data optimization, and scalable pipeline architecture in depth."}
+            ]
+        }
+
+        mock_get.side_effect = [mock_resp_native, mock_resp_ai]
+
+        sp = SupadataTranscriptProvider()
+        sp.api_key = "test_supadata_key_123"
+
+        res = sp.fetch("31_min_video_id")
+
+        assert res is not None
+        assert res.source == "supadata_ai"
+        assert "31-minute technical presentation" in res.transcript_text
+        assert mock_whisper.called is False, "Whisper audio extraction must NOT be called when Supadata AI fallback succeeds!"

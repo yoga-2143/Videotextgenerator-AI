@@ -304,7 +304,7 @@ class ClientProvidedTranscriptProvider(TranscriptProvider):
 
 
 class SupadataTranscriptProvider(TranscriptProvider):
-    """Primary cloud-safe transcript provider that uses the Supadata YouTube transcript API."""
+    """Primary cloud-safe transcript provider that uses the Supadata YouTube transcript API (with AI fallback)."""
     name: str = "supadata"
 
     def __init__(self):
@@ -313,6 +313,38 @@ class SupadataTranscriptProvider(TranscriptProvider):
     def is_available(self) -> bool:
         return bool(self.api_key)
 
+    def _parse_supadata_payload(self, data: dict, video_id: str, req_id: str, source_name: str = "supadata") -> Optional[TranscriptResult]:
+        if not isinstance(data, dict):
+            return None
+        chunks = []
+        lang = data.get("lang") or data.get("language") or "en"
+        content = data.get("content") or data.get("transcript") or []
+        if isinstance(content, list):
+            for item in content:
+                if isinstance(item, dict) and "text" in item:
+                    chunks.append(item["text"])
+                elif isinstance(item, str):
+                    chunks.append(item)
+        elif isinstance(content, str):
+            chunks.append(content)
+
+        raw_text = " ".join(chunks).strip()
+        if raw_text:
+            from app.services.transcript_service import clean_transcript
+            cleaned = clean_transcript(raw_text)
+            if cleaned:
+                res = TranscriptResult(
+                    video_id=video_id,
+                    source=source_name,
+                    source_language=lang,
+                    transcript_text=cleaned,
+                    confidence=0.98 if source_name == "supadata" else 0.92,
+                )
+                if validate_transcript(res, video_id):
+                    logger.info(f"TRANSCRIPT_PROVIDER={source_name.upper()} TRANSCRIPT_STATUS=SUCCESS VideoID={video_id} JobID={req_id[:8]} Hash={res.source_text_hash[:16]}")
+                    return res
+        return None
+
     def fetch(self, video_id: str, request_id: Optional[str] = None, provided_transcript: Optional[str] = None) -> Optional[TranscriptResult]:
         req_id = request_id or str(uuid.uuid4())
         if not self.is_available():
@@ -320,45 +352,58 @@ class SupadataTranscriptProvider(TranscriptProvider):
             return None
 
         logger.info(f"[PROVIDER_ATTEMPT] Provider=supadata | JobID={req_id[:8]} | VideoID={video_id}")
+        headers = {"x-api-key": self.api_key, "User-Agent": "VETRI/1.0"}
 
+        # Attempt 1: Native YouTube Captions via Supadata
         try:
             url = f"https://api.supadata.ai/v1/youtube/transcript?videoId={video_id}"
-            headers = {"x-api-key": self.api_key, "User-Agent": "VETRI/1.0"}
-            r = requests.get(url, headers=headers, timeout=6)
+            r = requests.get(url, headers=headers, timeout=8)
             if r.status_code == 200:
-                data = r.json()
-                chunks = []
-                lang = data.get("lang") or data.get("language") or "en"
-                content = data.get("content") or data.get("transcript") or []
-                if isinstance(content, list):
-                    for item in content:
-                        if isinstance(item, dict) and "text" in item:
-                            chunks.append(item["text"])
-                        elif isinstance(item, str):
-                            chunks.append(item)
-                elif isinstance(content, str):
-                    chunks.append(content)
-
-                raw_text = " ".join(chunks).strip()
-                if raw_text:
-                    from app.services.transcript_service import clean_transcript
-                    cleaned = clean_transcript(raw_text)
-                    res = TranscriptResult(
-                        video_id=video_id,
-                        source="supadata",
-                        source_language=lang,
-                        transcript_text=cleaned,
-                        confidence=0.98,
-                    )
-                    if validate_transcript(res, video_id):
-                        logger.info(f"TRANSCRIPT_PROVIDER=SUPADATA TRANSCRIPT_STATUS=SUCCESS VideoID={video_id} JobID={req_id[:8]} Hash={res.source_text_hash[:16]}")
-                        return res
+                res = self._parse_supadata_payload(r.json(), video_id, req_id, source_name="supadata")
+                if res:
+                    return res
             else:
-                logger.warning(f"[PROVIDER_FAILED] Provider=supadata | JobID={req_id[:8]} | Status={r.status_code} | Text={r.text[:200]}")
+                logger.warning(f"[SUPADATA_NATIVE_FAILED] JobID={req_id[:8]} | Status={r.status_code} | Text={r.text[:200]}")
         except Exception as e:
-            logger.warning(f"[PROVIDER_FAILED] Provider=supadata | JobID={req_id[:8]} | Error={e}")
+            logger.warning(f"[SUPADATA_NATIVE_ERROR] JobID={req_id[:8]} | Error={e}")
+
+        # Attempt 2: AI Fallback Transcription via Supadata Cloud
+        try:
+            logger.info(f"[SUPADATA_AI_FALLBACK_ATTEMPT] JobID={req_id[:8]} | VideoID={video_id}")
+            ai_url = f"https://api.supadata.ai/v1/youtube/transcript?videoId={video_id}&ai=true"
+            r_ai = requests.get(ai_url, headers=headers, timeout=12)
+
+            if r_ai.status_code == 200:
+                res = self._parse_supadata_payload(r_ai.json(), video_id, req_id, source_name="supadata_ai")
+                if res:
+                    return res
+            elif r_ai.status_code == 202:
+                job_data = r_ai.json()
+                job_id = job_data.get("jobId") or job_data.get("id") or job_data.get("job_id")
+                if job_id:
+                    logger.info(f"[SUPADATA_AI_JOB_QUEUED] JobID={req_id[:8]} | SupadataJobID={job_id}")
+                    poll_url = f"https://api.supadata.ai/v1/youtube/transcript/{job_id}"
+                    start_poll = time.time()
+                    while time.time() - start_poll < 45:
+                        time.sleep(2)
+                        p_res = requests.get(poll_url, headers=headers, timeout=8)
+                        if p_res.status_code == 200:
+                            p_data = p_res.json()
+                            status = p_data.get("status") or p_data.get("state")
+                            if status in ["completed", "done", "success"] or "content" in p_data or "transcript" in p_data:
+                                res = self._parse_supadata_payload(p_data, video_id, req_id, source_name="supadata_ai")
+                                if res:
+                                    return res
+                            elif status in ["failed", "error"]:
+                                logger.warning(f"[SUPADATA_AI_JOB_FAILED] JobID={req_id[:8]} | SupadataJobID={job_id}")
+                                break
+            else:
+                logger.warning(f"[SUPADATA_AI_FAILED] JobID={req_id[:8]} | Status={r_ai.status_code} | Text={r_ai.text[:200]}")
+        except Exception as e:
+            logger.warning(f"[SUPADATA_AI_ERROR] JobID={req_id[:8]} | Error={e}")
 
         return None
+
 
 
 class TranscriptProviderChain:

@@ -143,7 +143,7 @@ def test_8_backend_returns_real_error_code_and_message(client):
         assert res.status_code == 422
         assert data["success"] is False
         assert data["error"]["code"] == "AUDIO_EXTRACTION_FAILED"
-        assert data["error"]["message"] == "The video's audio could not be extracted."
+        assert data["error"]["message"] == "Unable to retrieve a transcript for this video right now. Please try again later."
 
 
 def test_9_retry_fresh_request_behavior(client):

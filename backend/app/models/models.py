@@ -78,6 +78,7 @@ class Article(db.Model):
     title = db.Column(db.String(500))
     content = db.Column(LongText)
     source_text_hash = db.Column(db.String(64), nullable=True, index=True)
+    hard_words_json = db.Column(db.Text, nullable=True)  # JSON-encoded hard words & explanations
     is_original = db.Column(db.Boolean, default=True)
     is_published = db.Column(db.Boolean, default=False)
     published_at = db.Column(db.DateTime, nullable=True)
@@ -99,6 +100,8 @@ class Audio(db.Model):
     article_id = db.Column(db.Integer, db.ForeignKey("articles.id"), nullable=False, index=True)
     language = db.Column(db.String(10), index=True)
     source_text_hash = db.Column(db.String(64), nullable=True, index=True)
+    translated_text_hash = db.Column(db.String(64), nullable=True, index=True)
+    voice_code = db.Column(db.String(100), nullable=True)
     file_path = db.Column(db.String(500))
     dubbing_source = db.Column(db.String(50), default="gtts_fallback")  # seamless_m4t, gtts_fallback, none
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
@@ -113,8 +116,10 @@ class TranslationCache(db.Model):
     article_id = db.Column(db.Integer, db.ForeignKey("articles.id"), nullable=False, index=True)
     target_language = db.Column(db.String(10), nullable=False, index=True)
     source_text_hash = db.Column(db.String(64), nullable=True, index=True)
+    translated_text_hash = db.Column(db.String(64), nullable=True, index=True)
     title = db.Column(db.String(500))
     content = db.Column(LongText)
+    hard_words_json = db.Column(db.Text, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     __table_args__ = (db.UniqueConstraint("article_id", "target_language", name="uq_article_target_lang"),)

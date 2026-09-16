@@ -217,3 +217,41 @@ def translate_text(text: str, target_lang: str, source_lang: str = "auto") -> st
 
     logger.info(f"[TRANSLATION SUCCESS] target={target_lang}, effective={effective_target}, result_len={len(final_translated)}")
     return final_translated
+
+
+def translate_hard_words(hard_words: list, target_lang: str, source_lang: str = "auto") -> list:
+    """Translates hard words definitions and explanations into target_lang for all 58 supported languages."""
+    if not hard_words or not isinstance(hard_words, list):
+        return []
+
+    lang_config = get_language_config(target_lang)
+    if not lang_config:
+        return hard_words
+
+    if source_lang != "auto" and target_lang.lower().strip() == source_lang.lower().strip():
+        return hard_words
+
+    translated = []
+    for item in hard_words:
+        if not isinstance(item, dict):
+            continue
+        try:
+            m = item.get("simple_meaning", "")
+            e = item.get("explanation", "")
+            ex = item.get("example", "")
+
+            m_trans = translate_text(m, target_lang, source_lang) if m else ""
+            e_trans = translate_text(e, target_lang, source_lang) if e else ""
+            ex_trans = translate_text(ex, target_lang, source_lang) if ex else ""
+
+            translated.append({
+                "word": item.get("word", ""),
+                "simple_meaning": m_trans or m,
+                "explanation": e_trans or e,
+                "example": ex_trans or ex,
+            })
+        except Exception as err:
+            logger.warning(f"Failed to translate hard word item '{item.get('word')}' to {target_lang}: {err}")
+            translated.append(item)
+
+    return translated

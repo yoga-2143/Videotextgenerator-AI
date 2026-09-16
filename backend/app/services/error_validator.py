@@ -26,6 +26,8 @@ RAW_ERROR_PATTERNS = [
     "yt-dlp",
     "ytdlp",
     "youtube-dl",
+    "audio could not be extracted",
+    "audio could not be",
     "traceback (most recent call last)",
     "sqlite3.",
     "sqlalchemy.",
@@ -56,8 +58,9 @@ def sanitize_user_error_message(code: str, raw_message: str = "") -> str:
 
     SAFE_ERROR_MAP = {
         "INVALID_URL": "Please enter a valid YouTube URL (e.g. https://www.youtube.com/watch?v=dQw4w9WgXcQ).",
-        "VIDEO_PRIVATE": "This video is private and cannot be processed.",
-        "VIDEO_UNAVAILABLE": "This YouTube video is unavailable, deleted, or does not exist.",
+        "VIDEO_PRIVATE": "Private videos require permission and cannot be processed.",
+        "VIDEO_UNLISTED": "Unlisted videos can be processed if the video and transcript/captions are accessible.",
+        "VIDEO_UNAVAILABLE": "Public videos can normally be processed.",
         "VIDEO_AGE_RESTRICTED": "This video has age access restrictions and cannot be processed.",
         "TRANSCRIPT_UNAVAILABLE": "Unable to retrieve a transcript for this video right now. Please try again later.",
         "BOT_PROTECTION_BLOCKED": "Unable to retrieve a transcript for this video right now. Please try again later.",
@@ -79,4 +82,4 @@ def sanitize_user_error_message(code: str, raw_message: str = "") -> str:
         if clean_msg and not contains_raw_error_text(clean_msg):
             return clean_msg
 
-    return SAFE_ERROR_MAP.get(clean_code, "Processing failed. Please try again later.")
+    return SAFE_ERROR_MAP.get(clean_code, "Unable to retrieve a transcript for this video right now. Please try again later.")
