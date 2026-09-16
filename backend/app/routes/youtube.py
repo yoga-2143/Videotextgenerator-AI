@@ -445,26 +445,22 @@ def process_video():
     else:
         submit_video_processing_task(run_async_video_processing, app, job_id, url, video_id, user_id)
 
-    # Synchronous wait up to 20s
-    start_wait = time.time()
-    while time.time() - start_wait < 20:
-        state = get_job_state(job_id)
-        if state and state["status"] == "completed" and state.get("result"):
-            return jsonify({"success": True, "data": state["result"]})
-        if state and state["status"] == "failed" and state.get("error"):
-            err = state["error"]
-            return error_response(err["code"], err["message"], 422, retryable=err.get("retryable", True))
-        time.sleep(0.5)
-
-    # If exceeding 20s, return job status payload for frontend polling
+    # Check immediate state (handles synchronous inline mocks in unit tests)
     state = get_job_state(job_id)
+    if state and state["status"] == "completed" and state.get("result"):
+        return jsonify({"success": True, "data": state["result"]})
+    if state and state["status"] == "failed" and state.get("error"):
+        err = state["error"]
+        return error_response(err["code"], err["message"], 422, retryable=err.get("retryable", True))
+
+    # Return job status payload immediately for frontend async polling
     return jsonify({
         "success": True,
         "job_id": job_id,
-        "status": state.get("status", "processing"),
-        "stage": state.get("stage", "processing"),
-        "progress": state.get("progress", 30),
-        "message": state.get("message", "Processing in progress..."),
+        "status": state.get("status", "queued") if state else "queued",
+        "stage": state.get("stage", JobStage.QUEUED) if state else JobStage.QUEUED,
+        "progress": state.get("progress", 5) if state else 5,
+        "message": state.get("message", STAGE_MESSAGES[JobStage.QUEUED]) if state else STAGE_MESSAGES[JobStage.QUEUED],
         "result_available": False,
         "data": state
     })

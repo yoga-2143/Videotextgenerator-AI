@@ -169,7 +169,7 @@ export default function YoutubeUrl() {
       } catch (err) {
         // Silent retry on polling error
       }
-    }, 1500)
+    }, 600)
   }
 
   async function startJobSubmission(targetUrl) {

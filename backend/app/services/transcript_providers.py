@@ -131,44 +131,7 @@ class AlternativeTranscriptProvider(TranscriptProvider):
         req_id = request_id or str(uuid.uuid4())
         logger.info(f"[PROVIDER_ATTEMPT] Provider=alternative_api | JobID={req_id[:8]} | VideoID={video_id}")
 
-        # Option A: Supadata API (https://api.supadata.ai/v1/youtube/transcript)
-        if self.supadata_api_key:
-            try:
-                url = f"https://api.supadata.ai/v1/youtube/transcript?videoId={video_id}"
-                headers = {"x-api-key": self.supadata_api_key, "User-Agent": "VETRI/1.0"}
-                r = requests.get(url, headers=headers, timeout=6)
-                if r.status_code == 200:
-                    data = r.json()
-                    chunks = []
-                    lang = data.get("lang") or data.get("language") or "en"
-                    content = data.get("content") or data.get("transcript") or []
-                    if isinstance(content, list):
-                        for item in content:
-                            if isinstance(item, dict) and "text" in item:
-                                chunks.append(item["text"])
-                            elif isinstance(item, str):
-                                chunks.append(item)
-                    elif isinstance(content, str):
-                        chunks.append(content)
-
-                    raw_text = " ".join(chunks).strip()
-                    if raw_text:
-                        from app.services.transcript_service import clean_transcript
-                        cleaned = clean_transcript(raw_text)
-                        res = TranscriptResult(
-                            video_id=video_id,
-                            source="alternative_api",
-                            source_language=lang,
-                            transcript_text=cleaned,
-                            confidence=0.95,
-                        )
-                        if validate_transcript(res, video_id):
-                            logger.info(f"TRANSCRIPT_PROVIDER=SUPADATA TRANSCRIPT_STATUS=SUCCESS VideoID={video_id} JobID={req_id[:8]}")
-                            return res
-            except Exception as e:
-                logger.warning(f"[PROVIDER_FAILED] Provider=alternative_api (Supadata) | JobID={req_id[:8]} | Error={e}")
-
-        # Option B: Alternative microservice URL
+        # Option A: Alternative microservice URL
         if self.alternative_api_url:
             try:
                 endpoint = f"{self.alternative_api_url.rstrip('/')}/transcript?video_id={video_id}"
@@ -412,8 +375,8 @@ class TranscriptProviderChain:
     def __init__(self, providers: Optional[List[TranscriptProvider]] = None):
         self.providers = providers or [
             ClientProvidedTranscriptProvider(),
-            SupadataTranscriptProvider(),
             YouTubeCaptionProvider(),
+            SupadataTranscriptProvider(),
             AlternativeTranscriptProvider(),
         ]
 
