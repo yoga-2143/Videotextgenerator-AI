@@ -383,6 +383,14 @@ def is_job_cancelled(job_id: str) -> bool:
         return False
 
 
+def touch_job_heartbeat(job_id: str):
+    """Updates job activity timestamp (updated_at) for long-running pipeline stages."""
+    with JOBS_LOCK:
+        if job_id in VIDEO_JOBS:
+            VIDEO_JOBS[job_id]["updated_at"] = time.time()
+            _sync_job_to_db(VIDEO_JOBS[job_id])
+
+
 def get_job_state(job_id: str) -> dict:
     with JOBS_LOCK:
         job = VIDEO_JOBS.get(job_id)
@@ -392,10 +400,10 @@ def get_job_state(job_id: str) -> dict:
                 VIDEO_JOBS[job_id] = job
 
         if job:
-            # Stale job watchdog guard: if status is processing but no update for 1800s (30m), auto-fail
+            # Stale job watchdog guard: if status is processing but no update for 300s (5m), auto-fail
             now = time.time()
             updated_at = job.get("updated_at", now)
-            if job.get("status") == "processing" and (now - updated_at) > 1800:
+            if job.get("status") == "processing" and (now - updated_at) > 300:
                 logger.warning(f"[STALE_JOB_WATCHDOG] JobID={job_id} stalled for {round(now - updated_at, 1)}s. Auto-failing.")
                 job["status"] = "failed"
                 job["stage"] = JobStage.FAILED

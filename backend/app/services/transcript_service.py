@@ -76,37 +76,48 @@ def _get_configured_session():
 
 
 def fetch_direct_innertube_captions(video_id: str, session=None):
-    """Fallback extractor that parses captionTracks directly from YouTube video page HTML."""
+    """Fallback extractor that parses captionTracks directly from YouTube video page HTML and timedtext API endpoints."""
     import requests, re, json, xml.etree.ElementTree as ET
     s = session or _get_configured_session()
     try:
-        r = s.get(f"https://www.youtube.com/watch?v={video_id}", timeout=15)
-        if r.status_code != 200:
-            return None, None
-        match = re.search(r'"captionTracks":\s*(\[.*?\])', r.text)
-        if not match:
-            return None, None
-        tracks = json.loads(match.group(1))
-        if not tracks:
-            return None, None
-        track = tracks[0]
-        for t in tracks:
-            if t.get("languageCode", "").startswith("en"):
-                track = t
-                break
-        base_url = track.get("baseUrl")
-        lang = track.get("languageCode", "en")
-        if not base_url:
-            return None, None
-        r_xml = s.get(base_url, timeout=15)
-        if r_xml.status_code == 200 and r_xml.text.strip():
-            root = ET.fromstring(r_xml.text)
-            chunks = [t.text.strip() for t in root.findall(".//text") if t.text and t.text.strip()]
-            full_text = " ".join(chunks)
-            if full_text:
-                return full_text, lang
+        r = s.get(f"https://www.youtube.com/watch?v={video_id}", timeout=10)
+        if r.status_code == 200:
+            match = re.search(r'"captionTracks":\s*(\[.*?\])', r.text)
+            if match:
+                tracks = json.loads(match.group(1))
+                if tracks:
+                    track = tracks[0]
+                    for t in tracks:
+                        if t.get("languageCode", "").startswith("en"):
+                            track = t
+                            break
+                    base_url = track.get("baseUrl")
+                    lang = track.get("languageCode", "en")
+                    if base_url:
+                        r_xml = s.get(base_url, timeout=10)
+                        if r_xml.status_code == 200 and r_xml.text.strip():
+                            root = ET.fromstring(r_xml.text)
+                            chunks = [t.text.strip() for t in root.findall(".//text") if t.text and t.text.strip()]
+                            full_text = " ".join(chunks)
+                            if full_text:
+                                return full_text, lang
     except Exception as e:
         logger.debug(f"[INNER_TUBE_CAPTIONS_NOTE] Direct HTML extraction note for {video_id}: {e}")
+
+    # Fallback to direct timedtext endpoints
+    for lang in ["en", "en-US", "en-GB", "es", "hi", "ta", "de", "fr"]:
+        try:
+            t_url = f"https://www.youtube.com/api/timedtext?v={video_id}&lang={lang}"
+            r_t = s.get(t_url, timeout=6)
+            if r_t.status_code == 200 and "<text" in r_t.text:
+                root = ET.fromstring(r_t.text)
+                chunks = [t.text.strip() for t in root.findall(".//text") if t.text and t.text.strip()]
+                full_text = " ".join(chunks)
+                if full_text:
+                    return full_text, lang
+        except Exception:
+            pass
+
     return None, None
 
 
@@ -350,11 +361,10 @@ def clean_transcript(raw_text: str) -> str:
     for pattern in SPEECH_NOISE_PATTERNS:
         text = re.sub(pattern, "", text, flags=re.IGNORECASE)
 
-    # 5. Remove phrase-level and word-level accidental repetitions ("in order to, in order to" -> "in order to", "the, the" -> "the")
-    for _ in range(5):
+    # 5. Remove phrase-level accidental repetitions ("in order to, in order to" -> "in order to")
+    for _ in range(3):
         t_prev = text
         text = re.sub(r"\b(\w+(?:\s+\w+){1,4})[\s,;:-]+\1\b", r"\1", text, flags=re.IGNORECASE)
-        text = re.sub(r"\b(\w+)[\s,;:-]+(?:\1\b)+", r"\1", text, flags=re.IGNORECASE)
         if text == t_prev:
             break
 

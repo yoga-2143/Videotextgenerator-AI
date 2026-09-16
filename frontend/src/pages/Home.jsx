@@ -83,25 +83,25 @@ export default function Home() {
             <li className="flex items-start gap-3 min-w-0">
               <span className="shrink-0 text-base sm:text-lg select-none">🔴</span>
               <span className="min-w-0 break-words">
-                <strong className="text-paper font-semibold">Private:</strong> We cannot process it because permission is required.
+                <strong className="text-paper font-semibold">Private:</strong> We cannot process it because permission is required
               </span>
             </li>
             <li className="flex items-start gap-3 min-w-0">
               <span className="shrink-0 text-base sm:text-lg select-none">🟡</span>
               <span className="min-w-0 break-words">
-                <strong className="text-paper font-semibold">Unlisted:</strong> We can process it using the link if captions/transcript are available.
+                <strong className="text-paper font-semibold">Unlisted:</strong> We can process it using the link if captions/transcript are available
               </span>
             </li>
             <li className="flex items-start gap-3 min-w-0">
               <span className="shrink-0 text-base sm:text-lg select-none">🟢</span>
               <span className="min-w-0 break-words">
-                <strong className="text-paper font-semibold">Public:</strong> We can normally process it.
+                <strong className="text-paper font-semibold">Public:</strong> We can normally process it
               </span>
             </li>
             <li className="flex items-start gap-3 min-w-0">
               <span className="shrink-0 text-base sm:text-lg select-none">⚠️</span>
               <span className="min-w-0 break-words">
-                <strong className="text-paper font-semibold">Age-restricted / Region-restricted / Members-only:</strong> It may not work because of access restrictions.
+                <strong className="text-paper font-semibold">Age-restricted / Region-restricted / Members-only:</strong> It may not work because of access restrictions
               </span>
             </li>
           </ul>

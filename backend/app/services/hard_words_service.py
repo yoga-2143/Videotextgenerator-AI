@@ -193,9 +193,15 @@ def generate_fallback_definition_for_word(word: str, transcript_context: str) ->
             "example": entry["example"]
         }
 
-    # Contextual sentence search for fallback
-    sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", transcript_context) if word.lower() in s.lower()]
-    example_sentence = sentences[0] if sentences else f"{word} is an important term discussed in the video."
+    # Contextual sentence search for fallback with strict length bounding (max 100 chars)
+    raw_parts = [s.strip() for s in re.split(r"(?<=[.!?])\s+|\n+", transcript_context) if word.lower() in s.lower()]
+    if raw_parts:
+        candidate = raw_parts[0]
+        if len(candidate) > 100:
+            candidate = candidate[:100].rsplit(' ', 1)[0] + "..."
+        example_sentence = candidate
+    else:
+        example_sentence = f"{word} is a key concept discussed in this video."
 
     return {
         "word": word.capitalize() if word.islower() else word,

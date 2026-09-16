@@ -74,12 +74,17 @@ def create_app():
                     "ALTER TABLE users ADD COLUMN password_hash VARCHAR(255)",
                     "ALTER TABLE videos ADD COLUMN processing_error_code VARCHAR(100)",
                     "ALTER TABLE articles ADD COLUMN source_text_hash VARCHAR(64)",
+                    "ALTER TABLE articles ADD COLUMN hard_words_json TEXT",
                     "ALTER TABLE articles ADD COLUMN is_published BOOLEAN DEFAULT 0",
                     "ALTER TABLE articles ADD COLUMN published_at DATETIME",
                     "ALTER TABLE articles ADD COLUMN qa_results TEXT",
                     "ALTER TABLE audio ADD COLUMN dubbing_source VARCHAR(50)",
                     "ALTER TABLE audio ADD COLUMN source_text_hash VARCHAR(64)",
-                    "ALTER TABLE translation_cache ADD COLUMN source_text_hash VARCHAR(64)"
+                    "ALTER TABLE audio ADD COLUMN translated_text_hash VARCHAR(64)",
+                    "ALTER TABLE audio ADD COLUMN voice_code VARCHAR(100)",
+                    "ALTER TABLE translation_cache ADD COLUMN source_text_hash VARCHAR(64)",
+                    "ALTER TABLE translation_cache ADD COLUMN translated_text_hash VARCHAR(64)",
+                    "ALTER TABLE translation_cache ADD COLUMN hard_words_json TEXT"
                 ]:
                     try:
                         conn.execute(db.text(alter_cmd))

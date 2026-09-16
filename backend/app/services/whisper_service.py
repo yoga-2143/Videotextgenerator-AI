@@ -133,6 +133,7 @@ def _download_full_audio(video_id: str, workdir: str) -> str:
         "quiet": True,
         "no_warnings": True,
         "socket_timeout": 30,
+        "max_filesize": 100 * 1024 * 1024,
         "nocheckcertificate": True,
         "prefer_insecure": True,
         "geo_bypass": True,

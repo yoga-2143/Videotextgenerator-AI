@@ -484,14 +484,17 @@ class TranscriptProviderChain:
                 logger.info(f"[PERF] whisper_end | JobID={req_id[:8]} | Duration={elapsed_w}ms | Error={type(whisper_err).__name__}")
                 from app.services.transcript_service import TranscriptError
                 from app.services.error_validator import sanitize_user_error_message
-                code = getattr(whisper_err, "code", "TRANSCRIPT_UNAVAILABLE")
-                if code in ["VIDEO_PRIVATE", "VIDEO_UNAVAILABLE", "INVALID_URL", "VIDEO_AGE_RESTRICTED"]:
+                if isinstance(whisper_err, TranscriptError):
                     raise whisper_err
+                if last_error and isinstance(last_error, TranscriptError) and last_error.code in ["VIDEO_PRIVATE", "VIDEO_UNAVAILABLE", "INVALID_URL", "VIDEO_AGE_RESTRICTED", "BOT_PROTECTION_BLOCKED"]:
+                    raise last_error
                 clean_msg = sanitize_user_error_message("TRANSCRIPT_UNAVAILABLE", str(whisper_err))
                 raise TranscriptError("TRANSCRIPT_UNAVAILABLE", clean_msg)
 
-        # If all transcript providers failed, raise a clean, user-safe error message
+        # If all transcript providers failed, raise specific last_error if available, or clean fallback error
         from app.services.transcript_service import TranscriptError
+        if last_error and isinstance(last_error, TranscriptError):
+            raise last_error
         raise TranscriptError(
             "TRANSCRIPT_UNAVAILABLE",
             "Unable to retrieve a transcript for this video right now. Please try again later."

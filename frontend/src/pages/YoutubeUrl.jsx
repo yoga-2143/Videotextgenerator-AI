@@ -15,6 +15,7 @@ export default function YoutubeUrl() {
   // State
   const [url, setUrl] = useState(initialUrl)
   const [error, setError] = useState('')
+  const [errorCode, setErrorCode] = useState('')
   const [loading, setLoading] = useState(() => initialAutoSubmit || !!initialJobId)
   const [currentJob, setCurrentJob] = useState(initialJobState || (initialJobId ? { job_id: initialJobId, status: 'queued', progress: 5 } : null))
   const [jobStageMessage, setJobStageMessage] = useState(initialJobState?.message || 'Checking transcript...')
@@ -28,6 +29,65 @@ export default function YoutubeUrl() {
   const activeJobIdRef = useRef(initialJobId)
   const currentJobUrlRef = useRef(initialUrl)
   const hasAutoSubmittedRef = useRef(false)
+
+  function getErrorUIDetails(code, rawMsg) {
+    const normalizedCode = (code || '').toUpperCase().trim()
+
+    const isVerifiedRestriction = [
+      'VIDEO_PRIVATE',
+      'PRIVATE',
+      'AGE_RESTRICTED',
+      'VIDEO_AGE_RESTRICTED',
+      'REGION_RESTRICTED',
+      'VIDEO_REGION_RESTRICTED',
+      'MEMBERS_ONLY'
+    ].includes(normalizedCode)
+
+    const isBotProtection = normalizedCode === 'BOT_PROTECTION_BLOCKED' || normalizedCode === 'BOT_PROTECTION'
+    const isNoCaptions = normalizedCode === 'NO_CAPTIONS'
+
+    if (isVerifiedRestriction) {
+      return {
+        title: '⚠️ This video can’t be processed',
+        message: 'This video is restricted (for example, 18+, age-restricted, region-restricted, or members-only), so VETRI can’t access the video content or transcript.',
+        suggestion: 'Please try a public or accessible YouTube video.',
+        statusLabel: 'URL Access Status:',
+        statusBadge: 'Video Can’t Be Processed — Restricted Video',
+        showTryAgain: false,
+      }
+    }
+
+    if (isBotProtection) {
+      return {
+        title: '⚠️ YouTube access is temporarily unavailable',
+        message: 'YouTube is temporarily blocking access to this video from our server. Please try again later or try another public video.',
+        suggestion: '',
+        statusLabel: 'URL Access Status:',
+        statusBadge: 'YouTube Access Temporarily Blocked',
+        showTryAgain: true,
+      }
+    }
+
+    if (isNoCaptions) {
+      return {
+        title: '⚠️ Transcript not available',
+        message: 'This video does not currently have an accessible transcript or captions that VETRI can use.',
+        suggestion: 'Please try another video with captions or an available transcript.',
+        statusLabel: 'URL Access Status:',
+        statusBadge: 'Transcript Not Available',
+        showTryAgain: false,
+      }
+    }
+
+    return {
+      title: '⚠️ We couldn’t get the transcript',
+      message: 'We couldn’t retrieve the transcript for this video right now. Please try again later or try another video.',
+      suggestion: '',
+      statusLabel: 'URL Access Status:',
+      statusBadge: 'Unable to Get Transcript',
+      showTryAgain: true,
+    }
+  }
 
   function startTimer() {
     setElapsedSeconds(0)
@@ -91,6 +151,7 @@ export default function YoutubeUrl() {
           pollingRef.current = null
           stopTimer()
           setLoading(false)
+          setErrorCode(jobState.error?.code || '')
           setError(jobState.error?.message || jobState.message || 'Unable to retrieve a transcript for this video right now. Please try again later.')
         }
       } catch (err) {
@@ -108,6 +169,7 @@ export default function YoutubeUrl() {
     }
 
     setError('')
+    setErrorCode('')
     setUrl(trimmed)
     currentJobUrlRef.current = trimmed
     setTranscriptText('')
@@ -143,6 +205,7 @@ export default function YoutubeUrl() {
       }
     } catch (err) {
       stopTimer()
+      setErrorCode(err.code || '')
       setError(err.message || 'Unable to retrieve a transcript for this video right now. Please try again later.')
       setLoading(false)
     }
@@ -289,70 +352,110 @@ export default function YoutubeUrl() {
                 </svg>
                 YOUTUBE VIDEO ACCESS GUIDE
               </h3>
-              <ul className="space-y-2.5 font-medium text-xs sm:text-sm text-paper/95 leading-relaxed">
+              <ul className="space-y-2.5 font-medium text-xs sm:text-sm text-paper/95 leading-relaxed mb-4">
                 <li className="flex items-start gap-2.5 min-w-0">
                   <span className="shrink-0 text-base select-none">🔴</span>
                   <span className="min-w-0 break-words">
-                    <strong className="text-paper font-semibold">Private:</strong> We cannot process it because permission is required.
+                    <strong className="text-paper font-semibold">Private:</strong> We cannot process it because permission is required
                   </span>
                 </li>
                 <li className="flex items-start gap-2.5 min-w-0">
                   <span className="shrink-0 text-base select-none">🟡</span>
                   <span className="min-w-0 break-words">
-                    <strong className="text-paper font-semibold">Unlisted:</strong> We can process it using the link if captions/transcript are available.
+                    <strong className="text-paper font-semibold">Unlisted:</strong> We can process it using the link if captions/transcript are available
                   </span>
                 </li>
                 <li className="flex items-start gap-2.5 min-w-0">
                   <span className="shrink-0 text-base select-none">🟢</span>
                   <span className="min-w-0 break-words">
-                    <strong className="text-paper font-semibold">Public:</strong> We can normally process it.
+                    <strong className="text-paper font-semibold">Public:</strong> We can normally process it
                   </span>
                 </li>
                 <li className="flex items-start gap-2.5 min-w-0">
                   <span className="shrink-0 text-base select-none">⚠️</span>
                   <span className="min-w-0 break-words">
-                    <strong className="text-paper font-semibold">Age-restricted / Region-restricted / Members-only:</strong> It may not work because of access restrictions.
+                    <strong className="text-paper font-semibold">Age-restricted / Region-restricted / Members-only:</strong> It may not work because of access restrictions
                   </span>
                 </li>
               </ul>
+
+              {/* URL Processing Capability Indicator - Truthful Backend State */}
+              <div className="pt-3 border-t border-line/40 flex flex-wrap items-center gap-2 text-xs font-mono">
+                <span className="text-mute font-bold uppercase">URL Access Status:</span>
+                {jobProgress < 25 && !transcriptText ? (
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full font-bold bg-amber-500/10 text-amber-400 border border-amber-500/30">
+                    <span className="h-2 w-2 rounded-full bg-amber-400 animate-ping"></span>
+                    Checking Video Access...
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
+                    <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                    Video Can Be Processed
+                  </span>
+                )}
+              </div>
             </div>
           </div>
         )}
 
-        {/* Error Display on Processing Screen (Requirement 9) */}
-        {error && !loading && (
-          <div className="rounded-2xl border border-rose-500/30 bg-rose-500/10 p-5 text-left text-paper">
-            <div className="flex items-center gap-2 mb-2 font-bold text-rose-400 font-mono text-xs sm:text-sm uppercase tracking-wider">
-              <svg className="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-              Processing Notice
-            </div>
-            <p className="text-sm sm:text-base leading-relaxed text-paper/90 font-medium mb-4">{error}</p>
-            <div className="flex flex-wrap items-center gap-3">
-              <button
-                type="button"
-                onClick={() => startJobSubmission(url || currentJobUrlRef.current)}
-                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-rose-500 text-white font-bold text-xs sm:text-sm hover:bg-rose-600 transition-colors cursor-pointer min-h-[44px]"
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+        {/* User-Friendly Error Display Card */}
+        {error && !loading && (() => {
+          const errCode = currentJob?.error?.code || errorCode
+          const errDetails = getErrorUIDetails(errCode, error)
+          return (
+            <div className="rounded-2xl border border-rose-500/30 bg-rose-500/10 p-5 sm:p-6 text-left text-paper shadow-2xl">
+              <div className="flex items-center gap-2 mb-3 font-bold text-rose-400 font-mono text-sm sm:text-base uppercase tracking-wider">
+                <svg className="w-5 h-5 shrink-0 text-rose-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
                 </svg>
-                Try Again
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setError('')
-                  setLoading(false)
-                }}
-                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl border border-line bg-panel text-paper font-bold text-xs sm:text-sm hover:bg-line/40 transition-colors cursor-pointer min-h-[44px]"
-              >
-                Enter Different URL
-              </button>
+                {errDetails.title}
+              </div>
+              <p className="text-sm sm:text-base leading-relaxed text-paper/95 font-medium mb-2">
+                {errDetails.message}
+              </p>
+              {errDetails.suggestion && (
+                <p className="text-xs sm:text-sm text-paper/80 font-mono mb-4 leading-relaxed">
+                  {errDetails.suggestion}
+                </p>
+              )}
+
+              {/* URL Access Status Indicator */}
+              <div className="mb-5 pt-3 border-t border-rose-500/20 flex flex-wrap items-center gap-2 text-xs font-mono">
+                <span className="text-rose-300 font-bold uppercase">{errDetails.statusLabel}</span>
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full font-bold bg-rose-500/20 text-rose-300 border border-rose-500/40">
+                  <span className="h-2 w-2 rounded-full bg-rose-400"></span>
+                  {errDetails.statusBadge}
+                </span>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-3">
+                {errDetails.showTryAgain && (
+                  <button
+                    type="button"
+                    onClick={() => startJobSubmission(url || currentJobUrlRef.current)}
+                    className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-rose-500 text-white font-bold text-xs sm:text-sm hover:bg-rose-600 transition-colors cursor-pointer min-h-[44px]"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                    Try Again
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setError('')
+                    setErrorCode('')
+                    setLoading(false)
+                  }}
+                  className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl border border-line bg-panel text-paper font-bold text-xs sm:text-sm hover:bg-line/40 transition-colors cursor-pointer min-h-[44px]"
+                >
+                  Try Another Video
+                </button>
+              </div>
             </div>
-          </div>
-        )}
+          )
+        })()}
 
         {/* URL Input Form (Visible when not processing and no error) */}
         {!loading && !error && (
@@ -396,25 +499,25 @@ export default function YoutubeUrl() {
             <li className="flex items-start gap-3 min-w-0">
               <span className="shrink-0 text-base sm:text-lg select-none">🔴</span>
               <span className="min-w-0 break-words">
-                <strong className="text-paper font-semibold">Private:</strong> We cannot process it because permission is required.
+                <strong className="text-paper font-semibold">Private:</strong> We cannot process it because permission is required
               </span>
             </li>
             <li className="flex items-start gap-3 min-w-0">
               <span className="shrink-0 text-base sm:text-lg select-none">🟡</span>
               <span className="min-w-0 break-words">
-                <strong className="text-paper font-semibold">Unlisted:</strong> We can process it using the link if captions/transcript are available.
+                <strong className="text-paper font-semibold">Unlisted:</strong> We can process it using the link if captions/transcript are available
               </span>
             </li>
             <li className="flex items-start gap-3 min-w-0">
               <span className="shrink-0 text-base sm:text-lg select-none">🟢</span>
               <span className="min-w-0 break-words">
-                <strong className="text-paper font-semibold">Public:</strong> We can normally process it.
+                <strong className="text-paper font-semibold">Public:</strong> We can normally process it
               </span>
             </li>
             <li className="flex items-start gap-3 min-w-0">
               <span className="shrink-0 text-base sm:text-lg select-none">⚠️</span>
               <span className="min-w-0 break-words">
-                <strong className="text-paper font-semibold">Age-restricted / Region-restricted / Members-only:</strong> It may not work because of access restrictions.
+                <strong className="text-paper font-semibold">Age-restricted / Region-restricted / Members-only:</strong> It may not work because of access restrictions
               </span>
             </li>
           </ul>
